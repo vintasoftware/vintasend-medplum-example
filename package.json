@@ -10,7 +10,11 @@
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "compile-templates": "compile-pug-templates ./notification-templates ./compiled-notification-templates.json",
+    "bots:build": "npm run clean && npm run compile-templates && tsc && node --no-warnings esbuild-script.mjs",
+    "bots:deploy": "node --loader ts-node/esm scripts/deploy-bots.ts",
+    "bots:build:dev": "npm run clean && npm run compile-templates && node --no-warnings esbuild-script.mjs"
   },
   "prettier": {
     "printWidth": 120,
@@ -57,6 +61,7 @@
     "node": "^22.18.0 || >=24.2.0"
   },
   "dependencies": {
-    "vintasend-medplum": "^0.4.1"
+    "vintasend": "^0.4.3",
+    "vintasend-medplum": "^0.4.5"
   }
 }

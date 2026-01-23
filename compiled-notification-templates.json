@@ -1,0 +1,4 @@
+{
+  "emails/task-assignment/body.html.pug": "doctype html\nhtml\n  head\n    meta(charset='utf-8')\n    style.\n      body {\n        white-space: pre-line;\n      }\n  body\n    h1 Task Assigned\n\n    p Hello #{firstName},\n\n    p You have been assigned a new task by #{requesterName}.\n\n    p\n      strong Task:\n      |  #{taskTitle}\n    if taskDescription\n      p\n        strong Description:\n        |  #{taskDescription}\n    if taskIsUrgent\n      p\n        strong URGENT\n\n    p\n      a(href=taskLink) View Task\n\n    p Please review the task details and take appropriate action.\n",
+  "emails/task-assignment/subject.txt.pug": "if taskIsUrgent\n  | [URGENT] Task assigned to you: #{taskTitle}\nelse\n  | Task assigned to you: #{taskTitle}"
+}
