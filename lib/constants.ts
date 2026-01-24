@@ -1,0 +1,1 @@
+export const BOTS_SYSTEM = 'http://vintasend-medplum-example.com/bots';

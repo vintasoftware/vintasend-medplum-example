@@ -44,8 +44,6 @@ export async function sendTaskAssignmentEmail(medplum: MedplumClient, task: Task
 
     const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
     const taskIsUrgent = task.priority === 'urgent';
-    const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
-    const taskIsUrgent = task.priority === 'urgent';
 
     let requesterName = 'someone';
     if (task.requester?.reference) {

@@ -527,54 +527,324 @@ npm run bots:deploy
 
 (Note: You'll need to configure your deployment script based on your Medplum setup)
 
-## Step 10: Using the Service
+## Step 10: Create the Bot Handler
 
-To use this in your Medplum bot or application:
+Create the main bot file that will be executed by the subscription at [bots/task-assignment-bot.ts](bots/task-assignment-bot.ts):
 
 ```typescript
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
-import { sendTaskAssignmentEmail } from './bots/services/emails/send-task-assignment-email';
+import { sendTaskAssignmentEmail } from './services/emails/send-task-assignment-email';
 
-export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
+/**
+ * Medplum Bot: Task Assignment Email Notification
+ * 
+ * This bot is triggered by a subscription when a Task is created or updated
+ * with an owner. It sends an email notification to the assigned practitioner.
+ * 
+ * Subscription Criteria: Task?owner:exists=true
+ * Triggers: create, update
+ */
+
+export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
-  
-  // Send email when task is assigned
+
+  console.log(`[TaskAssignmentBot] Processing task: ${task.id}`);
+  console.log(`[TaskAssignmentBot] Owner: ${task.owner?.reference}`);
+
+  // Only send email if task has an owner
   if (task.owner?.reference) {
-    await sendTaskAssignmentEmail(
-      medplum, 
-      task, 
-      'https://your-app-url.com'
-    );
+    const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
+
+    try {
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl);
+      console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);
+    } catch (error) {
+      console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);
+      // Don't throw - we don't want the subscription to fail
+      // The notification will be logged in Medplum as failed
+    }
+  } else {
+    console.log(`[TaskAssignmentBot] Task ${task.id} has no owner, skipping email notification`);
   }
-  
+
+  // Return the task unchanged
   return task;
 }
 ```
+
+## Step 11: Set Up the Subscription
+
+To automatically trigger the bot when tasks are assigned, we need to create a FHIR Subscription resource in Medplum. Let's create a setup script.
+
+### Create Environment Configuration
+
+First, create a [.env.example](.env.example) file with the necessary environment variables:
+
+```bash
+# Medplum Configuration
+MEDPLUM_BASE_URL=https://api.medplum.com
+MEDPLUM_CLIENT_ID=your-client-id-here
+MEDPLUM_CLIENT_SECRET=your-client-secret-here
+
+# Application Configuration
+APP_BASE_URL=https://your-app-url.com
+```
+
+Copy this to `.env` and fill in your actual values:
+```bash
+cp .env.example .env
+```
+
+**Important**: Add `.env` to your `.gitignore` to keep secrets safe!
+
+### Create the Subscription Setup Script
+
+The setup script at [scripts/setup-task-assignment-subscription.ts](scripts/setup-task-assignment-subscription.ts) handles creating or updating the subscription:
+
+```typescript
+import { MedplumClient } from '@medplum/core';
+import { Bot, Subscription } from '@medplum/fhirtypes';
+
+/**
+ * Sets up a subscription that triggers the task assignment email bot
+ * when a Task is created or updated with an owner assigned.
+ */
+
+async function setupTaskAssignmentSubscription() {
+  const medplum = new MedplumClient({
+    baseUrl: process.env.MEDPLUM_BASE_URL || 'https://api.medplum.com',
+    clientId: process.env.MEDPLUM_CLIENT_ID,
+    clientSecret: process.env.MEDPLUM_CLIENT_SECRET,
+  });
+
+  await medplum.startClientLogin(
+    process.env.MEDPLUM_CLIENT_ID!,
+    process.env.MEDPLUM_CLIENT_SECRET!
+  );
+
+  // Find or create the bot
+  const botCode = 'task-assignment-email-bot';
+  const existingBots = await medplum.searchResources('Bot', {
+    identifier: botCode,
+  });
+
+  let bot: Bot;
+  if (existingBots.length > 0) {
+    bot = existingBots[0];
+    console.log(`✅ Found existing bot: ${bot.id}`);
+  } else {
+    bot = await medplum.createResource<Bot>({
+      resourceType: 'Bot',
+      identifier: [{ system: 'https://your-domain.com/bot-identifier', value: botCode }],
+      name: 'Task Assignment Email Bot',
+      description: 'Sends email notifications when tasks are assigned to practitioners',
+    });
+    console.log(`✅ Created new bot: ${bot.id}`);
+  }
+
+  // Create or update subscription
+  const subscriptionCriteria = 'Task?owner:exists=true';
+  const subscriptionIdentifier = 'task-assignment-email-subscription';
+
+  const existingSubscriptions = await medplum.searchResources('Subscription', {
+    identifier: subscriptionIdentifier,
+  });
+
+  let subscription: Subscription;
+  if (existingSubscriptions.length > 0) {
+    subscription = await medplum.updateResource<Subscription>({
+      ...existingSubscriptions[0],
+      status: 'active',
+      reason: 'Trigger email notification when a task is assigned',
+      criteria: subscriptionCriteria,
+      channel: { type: 'rest-hook', endpoint: `Bot/${bot.id}` },
+      extension: [
+        {
+          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+          valueCode: 'create',
+        },
+        {
+          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+          valueCode: 'update',
+        },
+      ],
+    });
+    console.log(`✅ Updated subscription: ${subscription.id}`);
+  } else {
+    subscription = await medplum.createResource<Subscription>({
+      resourceType: 'Subscription',
+      identifier: [{ system: 'https://your-domain.com/subscription-identifier', value: subscriptionIdentifier }],
+      status: 'active',
+      reason: 'Trigger email notification when a task is assigned',
+      criteria: subscriptionCriteria,
+      channel: { type: 'rest-hook', endpoint: `Bot/${bot.id}` },
+      extension: [
+        {
+          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+          valueCode: 'create',
+        },
+        {
+          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+          valueCode: 'update',
+        },
+      ],
+    });
+    console.log(`✅ Created subscription: ${subscription.id}`);
+  }
+
+  console.log('\n📋 Subscription Details:');
+  console.log(`   Criteria: ${subscription.criteria}`);
+  console.log(`   Bot: ${bot.id} (${bot.name})`);
+  console.log(`   Triggers: Task create, update (when owner exists)`);
+}
+
+setupTaskAssignmentSubscription()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error('💥 Script failed:', error);
+    process.exit(1);
+  });
+```
+
+### Run the Setup
+
+Add the script command to your [package.json](package.json):
+
+```json
+{
+  "scripts": {
+    "setup:subscription": "node --loader ts-node/esm scripts/setup-task-assignment-subscription.ts"
+  }
+}
+```
+
+Now run the setup:
+
+```bash
+npm run setup:subscription
+```
+
+You should see output like:
+```
+✅ Successfully authenticated with Medplum
+✅ Found existing bot: bot-id-123
+✅ Updated subscription: subscription-id-456
+
+📋 Subscription Details:
+   Criteria: Task?owner:exists=true
+   Bot: bot-id-123 (Task Assignment Email Bot)
+   Triggers: Task create, update (when owner exists)
+
+✨ Script completed successfully
+```
+
+### Understanding Subscriptions
+
+The subscription we created:
+- **Criteria**: `Task?owner:exists=true` - Triggers when a Task has an owner
+- **Channel**: Points to our bot via `Bot/{bot-id}`
+- **Interactions**: Triggers on both `create` and `update` events
+- **Status**: `active` - The subscription is live
+
+When a Task is created or updated with an `owner` field, Medplum automatically:
+1. Evaluates the subscription criteria
+2. If matched, invokes the bot with the Task as input
+3. The bot sends the email notification
+
+## Step 12: Deploy Everything
+
+Now deploy your complete setup:
+
+```bash
+# 1. Build the bot
+npm run bots:build
+
+# 2. Deploy the bot code
+npm run bots:deploy
+
+# 3. Set up the subscription (if not already done)
+npm run setup:subscription
+```
+
+## Step 13: Using the Service
+
+The subscription is now active! The bot will automatically run when tasks are assigned. You can also call the service directly in your code:
+
+```typescript
+import { MedplumClient } from '@medplum/core';
+import { Task } from '@medplum/fhirtypes';
+import { sendTaskAssignmentEmail } from './bots/services/emails/send-task-assignment-email';
+
+// Direct usage (if not using subscription)
+export async function manualTaskAssignment(medplum: MedplumClient, task: Task) {
+  await sendTaskAssignmentEmail(
+    medplum, 
+    task, 
+    'https://your-app-url.com'
+  );
+}
+```
+
+### Testing the Integration
+
+Create or update a Task with an owner to trigger the email:
+
+```typescript
+const task = await medplum.createResource({
+  resourceType: 'Task',
+  status: 'requested',
+  intent: 'order',
+  priority: 'routine', // or 'urgent' for urgent tasks
+  code: {
+    text: 'Review patient chart',
+  },
+  description: 'Please review the patient chart and update the care plan',
+  owner: {
+    reference: 'Practitioner/123', // The practitioner who will receive the email
+  },
+  requester: {
+    reference: 'Practitioner/456', // Who requested the task
+  },
+});
+```
+
+The subscription will automatically:
+1. Detect the Task creation
+2. Trigger the bot
+3. Send the email notification
+
+### Monitoring
+
+Check bot execution in the Medplum console:
+- Navigate to **Bots** → **Task Assignment Email Bot**
+- View execution logs to see successful runs or errors
+- Check notification `Communication` resources for sent emails
 
 ## How It Works: The Full Flow
 
 Let's trace through what happens when a task is assigned:
 
 1. **Task Created**: A FHIR `Task` resource is created or updated with an `owner`
-2. **Bot Triggered**: Your Medplum bot is triggered (via subscription or direct call)
-3. **Service Called**: `sendTaskAssignmentEmail()` is invoked
-4. **Validation**: The service validates the task has an owner and isn't assigned to a Group
-5. **Data Enrichment**: 
+2. **Subscription Evaluates**: Medplum evaluates the subscription criteria (`Task?owner:exists=true`)
+3. **Bot Triggered**: If criteria matches, the bot is invoked with the Task resource
+4. **Service Called**: The bot handler calls `sendTaskAssignmentEmail()`
+5. **Validation**: The service validates the task has an owner and isn't assigned to a Group
+6. **Data Enrichment**: 
    - Fetches the requester's name
    - Builds the task link
    - Determines if the task is urgent
-6. **Notification Created**: VintaSend's `createNotification()` is called with:
+7. **Notification Created**: VintaSend's `createNotification()` is called with:
    - User ID (the FHIR reference)
    - Context parameters (taskTitle, taskDescription, etc.)
    - Template paths
-7. **Context Generation**: The `TaskAssignmentContextGenerator` runs:
+8. **Context Generation**: The `TaskAssignmentContextGenerator` runs:
    - Fetches the recipient's user record from Medplum
    - Extracts their first name (respecting preferred names)
    - Merges with the provided parameters
-8. **Template Rendering**: Pug templates are rendered with the enriched context
-9. **Email Sent**: The email is sent via Medplum's email adapter
-10. **Notification Stored**: VintaSend stores the notification record in Medplum for auditing
+9. **Template Rendering**: Pug templates are rendered with the enriched context
+10. **Email Sent**: The email is sent via Medplum's email adapter
+11. **Notification Stored**: VintaSend stores the notification record in Medplum for auditing
 
 ## Benefits of This Approach
 

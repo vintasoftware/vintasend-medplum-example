@@ -26,7 +26,7 @@ export const ChatListItem = (props: ChatListItemProps): JSX.Element => {
   const topicName = topic.topic?.text ?? content;
 
   return (
-    <MedplumLink to={getThreadUri(topic)} underline="never">
+    <MedplumLink to={getThreadUri(topic)}>
       <Group
         p="xs"
         align="center"

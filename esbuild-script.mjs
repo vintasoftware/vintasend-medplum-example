@@ -12,7 +12,7 @@ import { gqlPlugin } from './plugins/gql-plugin.mjs';
 // Find all TypeScript files in your source directory
 const entryPoints = fastGlob
   .sync(['./src/**/*.ts', './bots/**/*.ts', './lib/**/*.ts'])
-  .filter((file) => !file.endsWith('test.ts'));
+  .filter((file) => !file.endsWith('.test.ts') && !file.endsWith('.test.tsx') && !file.endsWith('test.ts') && !file.endsWith('test.setup.ts'));
 
 const botLayerDeps = Object.keys(botLayer.dependencies);
 

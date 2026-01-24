@@ -23,7 +23,7 @@ export function TaskListItem(props: TaskListItemProps): JSX.Element {
   const taskUrl = getTaskUri(task);
 
   return (
-    <MedplumLink to={taskUrl} underline="never">
+    <MedplumLink to={taskUrl}>
       <Group
         p="xs"
         align="center"
