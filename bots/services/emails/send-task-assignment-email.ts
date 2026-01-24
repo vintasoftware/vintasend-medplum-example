@@ -35,6 +35,15 @@ export async function sendTaskAssignmentEmail(medplum: MedplumClient, task: Task
 
   try {
     const taskTitle = task.code?.text || task.description || 'New Task';
+
+    if (!task.id) {
+      // eslint-disable-next-line no-console
+      console.error('[sendTaskAssignmentEmail] Task has no id');
+      throw new Error('Task must have an id to send task assignment email');
+    }
+
+    const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
+    const taskIsUrgent = task.priority === 'urgent';
     const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
     const taskIsUrgent = task.priority === 'urgent';
 
