@@ -6,13 +6,12 @@ import { BOTS_SYSTEM } from '../lib/constants.js';
 import { getMedplumClient } from './client.js';
 
 async function readBotFiles(description: BotDescription, medplum: MedplumClient) {
-  const sourceFile = fs.readFileSync(`bots/handlers/${description.name}.ts`, 'utf-8');
   const distFile = fs.readFileSync(`dist/bots/handlers/${description.name}.js`, 'utf-8');
 
   const [sourceCodeAttachment, executableCodeAttachment] = await Promise.all([
     medplum.createAttachment({
-      data: sourceFile,
-      contentType: ContentType.TYPESCRIPT,
+      data: distFile,
+      contentType: 'application/javascript',
     }),
     medplum.createAttachment({
       data: distFile,
