@@ -53,10 +53,10 @@ VintaSend-Medplum brings VintaSend's notification capabilities to Medplum health
 - Search notifications using standard FHIR queries
 - Works with Medplum's existing security and access controls
 
-**📧 Medplum Email Integration**
-- Uses Medplum's built-in email API
-- No additional email provider configuration needed
-- Inherits Medplum's email delivery infrastructure
+**📧 Flexible Email Providers**
+- Use any email provider through VintaSend adapters (SendGrid, AWS SES, Medplum, etc.)
+- Swap providers without changing your application code
+- This tutorial uses SendGrid for reliable email delivery
 
 **🎨 Pre-compiled Templates**
 - Pug templates compiled to JSON at build time
@@ -88,7 +88,7 @@ By the end of this tutorial, you'll have:
 First, let's add the VintaSend packages to our project:
 
 ```bash
-npm install vintasend vintasend-medplum
+npm install vintasend vintasend-medplum vintasend-sendgrid
 ```
 
 Update your [package.json](package.json):
@@ -97,10 +97,16 @@ Update your [package.json](package.json):
 {
   "dependencies": {
     "vintasend": "^0.4.3",
-    "vintasend-medplum": "^0.4.5"
+    "vintasend-medplum": "^0.4.5",
+    "vintasend-sendgrid": "^0.4.3"
   }
 }
 ```
+
+We're using:
+- `vintasend`: The core notification framework
+- `vintasend-medplum`: Medplum-specific adapters for FHIR storage
+- `vintasend-sendgrid`: SendGrid adapter for email delivery
 
 ## Step 2: Create Email Templates with Pug
 
@@ -256,10 +262,10 @@ import * as compiledTemplates from '../compiled-notification-templates.json';
 import { 
   MedplumNotificationBackend, 
   MedplumAttachmentManager, 
-  MedplumNotificationAdapterFactory, 
   PugInlineEmailTemplateRendererFactory, 
   MedplumLogger 
 } from 'vintasend-medplum';
+import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
 
 async function getUserById(medplum: MedplumClient, referenceString: string) {
   if (!referenceString) {
@@ -331,8 +337,16 @@ export function getNotificationService(medplum: MedplumClient) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum)
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>()
     .create(compiledTemplates);
-  const adapter = new MedplumNotificationAdapterFactory<NotificationTypeConfig>()
-    .create(medplum, templateRenderer, false);
+  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>()
+    .create(
+      templateRenderer,
+      false,
+      {
+        apiKey: process.env.SENDGRID_API_KEY || '',
+        fromEmail: process.env.SENDGRID_FROM_EMAIL || '',
+        fromName: process.env.SENDGRID_FROM_NAME,
+      }
+    );
     
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
@@ -354,11 +368,16 @@ This file does several important things:
 2. **Type Safety**: TypeScript types ensure that context parameters match what the templates expect.
 
 3. **VintaSend Setup**: The `getNotificationService` function wires together all the VintaSend components:
-   - **Backend**: Stores notification data in Medplum
-   - **Template Renderer**: Renders Pug templates
-   - **Adapter**: Handles email sending through Medplum
-   - **Logger**: Logs notification events
-   - **Attachment Manager**: Handles file attachments (if needed)
+   - **Backend**: Stores notification data in Medplum as FHIR `Communication` resources
+   - **Template Renderer**: Renders Pug templates from the compiled JSON
+   - **Adapter**: Handles email sending through SendGrid with API key authentication
+   - **Logger**: Logs notification events for debugging
+   - **Attachment Manager**: Handles file attachments stored as Medplum `Binary` resources (if needed)
+
+4. **SendGrid Configuration**: The adapter requires three environment variables:
+   - `SENDGRID_API_KEY`: Your SendGrid API key for authentication
+   - `SENDGRID_FROM_EMAIL`: The verified sender email address
+   - `SENDGRID_FROM_NAME`: Optional display name for the sender
 
 ## Step 7: Create the Task Assignment Email Service
 
@@ -575,9 +594,9 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 
 ## Step 11: Set Up the Subscription
 
-To automatically trigger the bot when tasks are assigned, we need to create a FHIR Subscription resource in Medplum. Let's create a setup script.
+To automatically trigger the bot when tasks are assigned, you need to create a FHIR Subscription resource in Medplum that links to your bot.
 
-### Create Environment Configuration
+### Environment Configuration
 
 First, create a [.env.example](.env.example) file with the necessary environment variables:
 
@@ -586,6 +605,11 @@ First, create a [.env.example](.env.example) file with the necessary environment
 MEDPLUM_BASE_URL=https://api.medplum.com
 MEDPLUM_CLIENT_ID=your-client-id-here
 MEDPLUM_CLIENT_SECRET=your-client-secret-here
+
+# SendGrid Configuration
+SENDGRID_API_KEY=your-sendgrid-api-key-here
+SENDGRID_FROM_EMAIL=noreply@yourdomain.com
+SENDGRID_FROM_NAME=Your App Name
 
 # Application Configuration
 APP_BASE_URL=https://your-app-url.com
@@ -598,159 +622,62 @@ cp .env.example .env
 
 **Important**: Add `.env` to your `.gitignore` to keep secrets safe!
 
-### Create the Subscription Setup Script
-
-The setup script at [scripts/setup-task-assignment-subscription.ts](scripts/setup-task-assignment-subscription.ts) handles creating or updating the subscription:
-
-```typescript
-import { MedplumClient } from '@medplum/core';
-import { Bot, Subscription } from '@medplum/fhirtypes';
-
-/**
- * Sets up a subscription that triggers the task assignment email bot
- * when a Task is created or updated with an owner assigned.
- */
-
-async function setupTaskAssignmentSubscription() {
-  const medplum = new MedplumClient({
-    baseUrl: process.env.MEDPLUM_BASE_URL || 'https://api.medplum.com',
-    clientId: process.env.MEDPLUM_CLIENT_ID,
-    clientSecret: process.env.MEDPLUM_CLIENT_SECRET,
-  });
-
-  await medplum.startClientLogin(
-    process.env.MEDPLUM_CLIENT_ID!,
-    process.env.MEDPLUM_CLIENT_SECRET!
-  );
-
-  // Find or create the bot
-  const botCode = 'task-assignment-email-bot';
-  const existingBots = await medplum.searchResources('Bot', {
-    identifier: botCode,
-  });
-
-  let bot: Bot;
-  if (existingBots.length > 0) {
-    bot = existingBots[0];
-    console.log(`✅ Found existing bot: ${bot.id}`);
-  } else {
-    bot = await medplum.createResource<Bot>({
-      resourceType: 'Bot',
-      identifier: [{ system: 'https://your-domain.com/bot-identifier', value: botCode }],
-      name: 'Task Assignment Email Bot',
-      description: 'Sends email notifications when tasks are assigned to practitioners',
-    });
-    console.log(`✅ Created new bot: ${bot.id}`);
-  }
-
-  // Create or update subscription
-  const subscriptionCriteria = 'Task?owner:exists=true';
-  const subscriptionIdentifier = 'task-assignment-email-subscription';
-
-  const existingSubscriptions = await medplum.searchResources('Subscription', {
-    identifier: subscriptionIdentifier,
-  });
-
-  let subscription: Subscription;
-  if (existingSubscriptions.length > 0) {
-    subscription = await medplum.updateResource<Subscription>({
-      ...existingSubscriptions[0],
-      status: 'active',
-      reason: 'Trigger email notification when a task is assigned',
-      criteria: subscriptionCriteria,
-      channel: { type: 'rest-hook', endpoint: `Bot/${bot.id}` },
-      extension: [
-        {
-          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-          valueCode: 'create',
-        },
-        {
-          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-          valueCode: 'update',
-        },
-      ],
-    });
-    console.log(`✅ Updated subscription: ${subscription.id}`);
-  } else {
-    subscription = await medplum.createResource<Subscription>({
-      resourceType: 'Subscription',
-      identifier: [{ system: 'https://your-domain.com/subscription-identifier', value: subscriptionIdentifier }],
-      status: 'active',
-      reason: 'Trigger email notification when a task is assigned',
-      criteria: subscriptionCriteria,
-      channel: { type: 'rest-hook', endpoint: `Bot/${bot.id}` },
-      extension: [
-        {
-          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-          valueCode: 'create',
-        },
-        {
-          url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-          valueCode: 'update',
-        },
-      ],
-    });
-    console.log(`✅ Created subscription: ${subscription.id}`);
-  }
-
-  console.log('\n📋 Subscription Details:');
-  console.log(`   Criteria: ${subscription.criteria}`);
-  console.log(`   Bot: ${bot.id} (${bot.name})`);
-  console.log(`   Triggers: Task create, update (when owner exists)`);
-}
-
-setupTaskAssignmentSubscription()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error('💥 Script failed:', error);
-    process.exit(1);
-  });
-```
-
-### Run the Setup
-
-Add the script command to your [package.json](package.json):
-
-```json
-{
-  "scripts": {
-    "setup:subscription": "node --loader ts-node/esm scripts/setup-task-assignment-subscription.ts"
-  }
-}
-```
-
-Now run the setup:
-
-```bash
-npm run setup:subscription
-```
-
-You should see output like:
-```
-✅ Successfully authenticated with Medplum
-✅ Found existing bot: bot-id-123
-✅ Updated subscription: subscription-id-456
-
-📋 Subscription Details:
-   Criteria: Task?owner:exists=true
-   Bot: bot-id-123 (Task Assignment Email Bot)
-   Triggers: Task create, update (when owner exists)
-
-✨ Script completed successfully
-```
-
 ### Understanding Subscriptions
 
-The subscription we created:
-- **Criteria**: `Task?owner:exists=true` - Triggers when a Task has an owner
-- **Channel**: Points to our bot via `Bot/{bot-id}`
-- **Interactions**: Triggers on both `create` and `update` events
+A Subscription in Medplum needs:
+- **Criteria**: A FHIR search query that determines when to trigger
+- **Channel**: Points to your bot via `Bot/{bot-id}`
+- **Interactions**: Which events trigger the subscription (create, update, delete)
 - **Status**: `active` - The subscription is live
 
-When a Task is created or updated with an `owner` field, Medplum automatically:
+When a matching resource event occurs, Medplum automatically:
 1. Evaluates the subscription criteria
-2. If matched, invokes the bot with the Task as input
-3. The bot sends the email notification
+2. If matched, invokes the bot with the resource as input
+3. The bot executes its logic (in our case, sending an email)
+
+### Creating the Subscription
+
+For our task assignment email notification, you'll need to create a subscription with:
+
+- **Criteria**: `Task?owner:missing=false`
+  - This triggers whenever a Task resource has an `owner` field
+  - Matches both newly assigned tasks and tasks where ownership changes
+- **Supported Interactions**: `create` and `update`
+  - Sends notifications for new task assignments and reassignments
+- **Channel Endpoint**: `Bot/{your-task-assignment-bot-id}`
+
+There are several ways to create subscriptions in Medplum:
+- Through the Medplum console UI
+- Via the Medplum API programmatically
+- As part of your deployment workflow
+
+**In this project**, subscription creation is handled automatically as part of our bot deployment workflow. When you run `npm run bots:deploy`, the deployment process creates or updates the subscription with the criteria above, linked to the task assignment bot. This ensures the subscription is always in sync with your deployed bot code.
+
+Here's an example of how we configure our bot and its subscription in our deployment configuration:
+
+```typescript
+// Example from our deployment configuration
+const botConfig = {
+  name: 'Task Assignment Email Bot',
+  description: 'Sends email notifications when tasks are assigned to practitioners',
+  source: './dist/bots/task-assignment-bot.js',
+  subscription: {
+    criteria: 'Task?owner:missing=false',
+    reason: 'Trigger email notification when a task is assigned',
+    supportedInteractions: ['create', 'update'],
+  },
+};
+```
+
+When the deployment runs, it:
+1. Creates or updates the bot with the specified source code
+2. Creates or updates the subscription with the given criteria
+3. Links the subscription to the bot automatically
+4. Sets the subscription status to `active`
+
+This declarative approach means you never have to manually manage subscriptions - they're always kept in sync with your bot deployments.
+
+You can check how our deploy configuration works in our [deploy-bots.ts script](https://github.com/vintasoftware/vintasend-medplum-example/blob/main/scripts/deploy-bots.ts).
 
 ## Step 12: Deploy Everything
 
@@ -760,12 +687,14 @@ Now deploy your complete setup:
 # 1. Build the bot
 npm run bots:build
 
-# 2. Deploy the bot code
+# 2. Deploy the bot code (this also handles subscription creation)
 npm run bots:deploy
-
-# 3. Set up the subscription (if not already done)
-npm run setup:subscription
 ```
+
+The deployment process will:
+- Upload the compiled bot code to Medplum
+- Create or update the subscription linking to the bot
+- Activate the subscription to start receiving Task events
 
 ## Step 13: Using the Service
 
@@ -843,8 +772,8 @@ Let's trace through what happens when a task is assigned:
    - Extracts their first name (respecting preferred names)
    - Merges with the provided parameters
 9. **Template Rendering**: Pug templates are rendered with the enriched context
-10. **Email Sent**: The email is sent via Medplum's email adapter
-11. **Notification Stored**: VintaSend stores the notification record in Medplum for auditing
+11. **Email Sent**: The email is sent via SendGrid's API
+12. **Notification Stored**: VintaSend stores the notification record in Medplum as a FHIR `Communication` resource for auditing
 
 ## Benefits of This Approach
 
@@ -872,9 +801,10 @@ Now that you have task assignment emails working, you can:
 - Check that template paths match exactly
 
 **Emails not sending?**
-- Verify Medplum email configuration
-- Check bot logs for errors
-- Ensure the user has a valid email address in their FHIR resource
+- Verify SendGrid API key is valid and has sending permissions
+- Check that `SENDGRID_FROM_EMAIL` is a verified sender in SendGrid
+- Review bot logs for SendGrid API errors
+- Ensure the recipient's FHIR resource has a valid `telecom` entry with email
 
 **Context data missing?**
 - Verify the context generator is fetching data correctly
@@ -888,6 +818,7 @@ The combination of VintaSend and Medplum provides a powerful foundation for heal
 
 ## Resources
 
+- [VintaSend Medplum Example App](https://github.com/vintasoftware/vintasend-medplum-example)
 - [VintaSend Documentation](https://github.com/vintasoftware/vintasend)
 - [VintaSend-Medplum Documentation](https://github.com/vintasoftware/vintasend-medplum)
 - [Medplum Documentation](https://www.medplum.com/docs)
