@@ -4,7 +4,8 @@ import { VintaSendFactory } from 'vintasend';
 import { MedplumSingleton } from './medplum-singleton';
 import { formatPatientNameWithPreferredName } from './patients';
 import * as compiledTemplates from '../compiled-notification-templates.json';
-import { MedplumNotificationBackend, MedplumAttachmentManager, MedplumNotificationAdapterFactory, PugInlineEmailTemplateRendererFactory, MedplumLogger } from 'vintasend-medplum';
+import { MedplumNotificationBackend, MedplumAttachmentManager, PugInlineEmailTemplateRendererFactory, MedplumLogger } from 'vintasend-medplum';
+import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
 
 
 async function getUserById(medplum: MedplumClient, referenceString: string) {
@@ -125,7 +126,15 @@ export type NotificationTypeConfig = {
 export function getNotificationService(medplum: MedplumClient) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum)
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(compiledTemplates);
-  const adapter = new MedplumNotificationAdapterFactory<NotificationTypeConfig>().create(medplum, templateRenderer, false);
+  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(
+    templateRenderer,
+    false,
+    {
+      apiKey: process.env.SENDGRID_API_KEY || '',
+      fromEmail: process.env.SENDGRID_FROM_EMAIL || '',
+      fromName: process.env.SENDGRID_FROM_NAME,
+    }
+  );
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
     backend,
