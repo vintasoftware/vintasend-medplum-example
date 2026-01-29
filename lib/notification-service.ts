@@ -4,9 +4,13 @@ import { VintaSendFactory } from 'vintasend';
 import { MedplumSingleton } from './medplum-singleton';
 import { formatPatientNameWithPreferredName } from './patients';
 import * as compiledTemplates from '../compiled-notification-templates.json';
-import { MedplumNotificationBackend, MedplumAttachmentManager, PugInlineEmailTemplateRendererFactory, MedplumLogger } from 'vintasend-medplum';
+import {
+  MedplumNotificationBackend,
+  MedplumAttachmentManager,
+  PugInlineEmailTemplateRendererFactory,
+  MedplumLogger,
+} from 'vintasend-medplum';
 import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
-
 
 async function getUserById(medplum: MedplumClient, referenceString: string) {
   if (!referenceString) {
@@ -123,24 +127,28 @@ export type NotificationTypeConfig = {
   UserIdType: string;
 };
 
-export function getNotificationService(medplum: MedplumClient) {
-  const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum)
-  const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(compiledTemplates);
-  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(
-    templateRenderer,
-    false,
-    {
-      apiKey: process.env.SENDGRID_API_KEY || '',
-      fromEmail: process.env.SENDGRID_FROM_EMAIL || '',
-      fromName: process.env.SENDGRID_FROM_NAME,
-    }
+export type SendGridVariables = {
+  SENDGRID_API_KEY: string;
+  SENDGRID_FROM_EMAIL: string;
+  SENDGRID_FROM_NAME: string;
+};
+
+export function getNotificationService(medplum: MedplumClient, variables: SendGridVariables) {
+  const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
+  const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
+    compiledTemplates
   );
+  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
+    apiKey: variables.SENDGRID_API_KEY || '',
+    fromEmail: variables.SENDGRID_FROM_EMAIL || '',
+    fromName: variables.SENDGRID_FROM_NAME,
+  });
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
     backend,
     new MedplumLogger(),
     contextGeneratorsMap,
     undefined,
-    new MedplumAttachmentManager(medplum),
+    new MedplumAttachmentManager(medplum)
   );
 }

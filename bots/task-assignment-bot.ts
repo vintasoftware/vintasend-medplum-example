@@ -4,16 +4,22 @@ import { sendTaskAssignmentEmail } from './services/emails/send-task-assignment-
 
 /**
  * Medplum Bot: Task Assignment Email Notification
- * 
+ *
  * This bot is triggered by a subscription when a Task is created or updated
  * with an owner. It sends an email notification to the assigned practitioner.
- * 
+ *
  * Subscription Criteria: Task?owner:exists=true
  * Triggers: create, update
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
+  const secrets = event.secrets;
+  const sendGridVariables = {
+    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
+    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
+    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
+  };
 
   console.log(`[TaskAssignmentBot] Processing task: ${task.id}`);
   console.log(`[TaskAssignmentBot] Owner: ${task.owner?.reference}`);
@@ -23,7 +29,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
 
     try {
-      await sendTaskAssignmentEmail(medplum, task, appBaseUrl);
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
       console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);
     } catch (error) {
       console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);
