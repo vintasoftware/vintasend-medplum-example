@@ -1,1 +1,1 @@
-export const PREFERRED_NAME_EXTENSION_URL = 'http://joinrewind.com/preferred-name';
+export const PREFERRED_NAME_EXTENSION_URL = 'http://vintasend-medplum-example.com/preferred-name';
