@@ -23,7 +23,7 @@ export function LabListItem(props: LabListItemProps): JSX.Element {
   const requester = useResource(item.requester) as Practitioner | undefined;
 
   return (
-    <MedplumLink to={onItemSelect(item)} underline="never">
+    <MedplumLink to={onItemSelect(item)}>
       <Group
         align="center"
         wrap="nowrap"

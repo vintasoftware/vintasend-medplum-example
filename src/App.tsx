@@ -114,7 +114,6 @@ export function App(): JSX.Element | null {
           : undefined
       }
       resourceTypeSearchDisabled={true}
-      spotlightPatientsOnly={true}
     >
       <Suspense fallback={<Loading />}>
         <Routes>

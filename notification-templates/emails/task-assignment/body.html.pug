@@ -1,0 +1,30 @@
+doctype html
+html
+  head
+    meta(charset='utf-8')
+    style.
+      body {
+        white-space: pre-line;
+      }
+  body
+    h1 Task Assigned
+
+    p Hello #{firstName},
+
+    p You have been assigned a new task by #{requesterName}.
+
+    p
+      strong Task:
+      |  #{taskTitle}
+    if taskDescription
+      p
+        strong Description:
+        |  #{taskDescription}
+    if taskIsUrgent
+      p
+        strong URGENT
+
+    p
+      a(href=taskLink) View Task
+
+    p Please review the task details and take appropriate action.
