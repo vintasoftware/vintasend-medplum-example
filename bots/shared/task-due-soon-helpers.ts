@@ -6,6 +6,7 @@ export type TaskDueSoonCheck =
   | { kind: 'ok'; hoursUntilDue: number }
   | { kind: 'invalidResource' }
   | { kind: 'noDueDate' }
+  | { kind: 'invalidDueDate'; dueDate: string }
   | { kind: 'finalState'; status: string }
   | { kind: 'noOwner' }
   | { kind: 'tooSoon'; hoursUntilDue: number };
@@ -43,6 +44,10 @@ export function getTaskDueSoonSchedulingReason(task: Task | undefined): TaskDueS
   }
 
   const hoursUntilDue = getHoursUntil(dueDate);
+  if (Number.isNaN(hoursUntilDue)) {
+    return { kind: 'invalidDueDate', dueDate };
+  }
+
   if (hoursUntilDue < 24) {
     return { kind: 'tooSoon', hoursUntilDue };
   }

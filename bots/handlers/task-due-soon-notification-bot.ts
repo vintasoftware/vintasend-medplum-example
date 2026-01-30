@@ -28,6 +28,11 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     case 'noDueDate':
       console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no due date, skipping`);
       return { message: 'No due date set', taskId: task?.id };
+    case 'invalidDueDate':
+      console.warn(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} has invalid due date: ${result.dueDate}, skipping`
+      );
+      return { message: 'Invalid due date', taskId: task?.id, dueDate: result.dueDate };
     case 'finalState':
       console.log(
         `[TaskDueSoonNotificationBot] Task ${task?.id} is in final state (${result.status}), skipping`
