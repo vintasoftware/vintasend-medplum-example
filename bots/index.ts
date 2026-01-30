@@ -31,8 +31,17 @@ export const BOTS: BotDescription[] = [
     name: 'task-due-notification-bot',
     needsAdminMembership: true,
     runAsUser: true,
-    cronString: '*/5 * * * *', // Run every 5 minutes
-    timeout: 300, // 5 minutes timeout
+    criteria: 'Task?owner:missing=false',
+    extension: [
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'create',
+      },
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'update',
+      },
+    ],
   },
   {
     name: 'send-pending-notifications-bot',

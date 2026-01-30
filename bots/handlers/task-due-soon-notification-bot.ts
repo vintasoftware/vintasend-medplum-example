@@ -1,21 +1,29 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
+import { Task } from '@medplum/fhirtypes';
 import { sendTaskDueSoonEmail } from '../services/emails/send-task-due-soon-email';
 
 /**
  * Medplum Bot: Task Due Soon Notification
  * 
- * This bot runs periodically (every 5 minutes) to check for tasks that are
- * due in approximately 24-25 hours and schedules email notifications to be
- * sent 24 hours before the task due date.
+ * This bot triggers on Task creation/update and schedules email notifications
+ * to be sent 24 hours before the task due date.
  * 
  * The bot uses VintaSend's scheduled messages (sendAfter) to ensure
- * notifications are sent at the appropriate time.
+ * notifications are sent at the appropriate time. The actual sending is
+ * handled by the send-pending-notifications-bot.
  * 
- * Cron: 5 * * * * (every 5 minutes)
+ * Subscription: Task (create/update)
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
-  console.log('[TaskDueSoonNotificationBot] Starting periodic check for tasks due in ~24 hours');
+  const task = event.input as Task;
+
+  if (!task || task.resourceType !== 'Task') {
+    console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
+    return { message: 'Invalid task resource' };
+  }
+
+  console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
 
   const appBaseUrl = process.env.APP_BASE_URL || 'https://vintasend-medplum-example.com';
   const secrets = event.secrets;
@@ -25,69 +33,53 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
   };
 
-  // Calculate the time window: 24-25 hours from now
-  // We use a 1-hour window to catch tasks that will be due soon
+  // Check if task has a due date
+  const dueDate = task.restriction?.period?.end;
+  if (!dueDate) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no due date, skipping`);
+    return { message: 'No due date set', taskId: task.id };
+  }
+
+  // Check if task is in a final state (completed, cancelled, etc.)
+  const finalStates = ['completed', 'cancelled', 'failed', 'rejected', 'entered-in-error'];
+  if (task.status && finalStates.includes(task.status)) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} is in final state (${task.status}), skipping`);
+    return { message: `Task in final state: ${task.status}`, taskId: task.id };
+  }
+
+  // Check if task has an owner
+  if (!task.owner) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no owner, skipping`);
+    return { message: 'No owner assigned', taskId: task.id };
+  }
+
+  // Calculate if the due date is more than 24 hours away
   const now = new Date();
-  const windowStart = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
-  const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000); // 25 hours from now
+  const dueDateTime = new Date(dueDate);
+  const hoursUntilDue = (dueDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  if (hoursUntilDue < 24) {
+    console.log(
+      `[TaskDueSoonNotificationBot] Task ${task.id} is due in ${hoursUntilDue.toFixed(2)} hours (less than 24), skipping`
+    );
+    return { message: 'Due date is less than 24 hours away', taskId: task.id, hoursUntilDue };
+  }
 
   try {
-    // Search for tasks that:
-    // 1. Have an owner (assigned to someone)
-    // 2. Are not completed or cancelled
-    // 3. Have a due date (restriction.period.end) within the 24-25 hour window
-    const searchResults = await medplum.search('Task', {
-      'owner:missing': 'false',
-      'status:not': 'completed,cancelled,failed,rejected,entered-in-error',
-      // FHIR date search uses the format: ge (greater or equal) and lt (less than)
-      'restriction-date': `ge${windowStart.toISOString()}&restriction-date=lt${windowEnd.toISOString()}`,
-    });
-
-    const tasks = searchResults.entry?.map((e) => e.resource) || [];
-    
-    console.log(`[TaskDueSoonNotificationBot] Found ${tasks.length} tasks due in the next 24-25 hours`);
-
-    if (tasks.length === 0) {
-      console.log('[TaskDueSoonNotificationBot] No tasks to process');
-      return { message: 'No tasks to process', processedTasks: 0 };
-    }
-
-    // Process each task and schedule notifications
-    const results = await Promise.allSettled(
-      tasks.map(async (task) => {
-        if (!task || task.resourceType !== 'Task') {
-          console.warn('[TaskDueSoonNotificationBot] Skipping invalid task resource:', task);
-          return { status: 'skipped', reason: 'Invalid task resource' };
-        }
-        try {
-          console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
-          await sendTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
-          return { taskId: task.id, status: 'success' };
-        } catch (error) {
-          console.error(`[TaskDueSoonNotificationBot] Error processing task ${task.id}:`, error);
-          return { taskId: task.id, status: 'error', error: String(error) };
-        }
-      })
-    );
-
-    const successful = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.filter((r) => r.status === 'rejected').length;
-
+    // Schedule the notification to be sent 24 hours before the due date
     console.log(
-      `[TaskDueSoonNotificationBot] Completed. Successful: ${successful}, Failed: ${failed}, Total: ${tasks.length}`
+      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(2)} hours`
     );
+    await sendTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
     return {
-      message: 'Task due soon notifications processed',
-      processedTasks: tasks.length,
-      successful,
-      failed,
-      results: results.map((r) =>
-        r.status === 'fulfilled' ? r.value : { status: 'rejected', reason: r.reason }
-      ),
+      message: 'Notification scheduled successfully',
+      taskId: task.id,
+      dueDate,
+      hoursUntilDue: hoursUntilDue.toFixed(2),
     };
   } catch (error) {
-    console.error('[TaskDueSoonNotificationBot] Error during execution:', error);
+    console.error(`[TaskDueSoonNotificationBot] Error scheduling notification for task ${task.id}:`, error);
     throw error;
   }
 }
