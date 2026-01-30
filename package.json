@@ -15,8 +15,7 @@
     "compile-templates": "compile-pug-templates ./notification-templates ./compiled-notification-templates.json",
     "bots:build": "npm run clean && npm run compile-templates && tsc --project tsconfig.bots.json && node --no-warnings esbuild-script.mjs",
     "bots:deploy": "tsx scripts/deploy-bots.ts",
-    "bots:build:dev": "npm run clean && npm run compile-templates && node --no-warnings esbuild-script.mjs",
-    "setup:subscription": "tsx scripts/setup-task-assignment-subscription.ts"
+    "bots:build:dev": "npm run clean && npm run compile-templates && node --no-warnings esbuild-script.mjs"
   },
   "prettier": {
     "printWidth": 120,
