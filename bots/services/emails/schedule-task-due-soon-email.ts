@@ -22,6 +22,13 @@ export async function scheduleTaskDueSoonEmail(
     throw new Error('Task must have a due date (restriction.period.end)');
   }
 
+  const dueDate = new Date(task.restriction.period.end);
+  if (Number.isNaN(dueDate.getTime())) {
+    // eslint-disable-next-line no-console
+    console.error('[scheduleTaskDueSoonEmail] Task has invalid due date:', task.restriction.period.end);
+    throw new Error('Task must have a valid due date (restriction.period.end)');
+  }
+
   const referenceString = task.owner.reference;
 
   // Validate format (should be "ResourceType/id")
@@ -53,7 +60,6 @@ export async function scheduleTaskDueSoonEmail(
 
     const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
     const taskIsUrgent = task.priority === 'urgent';
-    const dueDate = new Date(task.restriction.period.end);
     const formattedDueDate = dueDate.toLocaleString('en-US', {
       weekday: 'long',
       year: 'numeric',

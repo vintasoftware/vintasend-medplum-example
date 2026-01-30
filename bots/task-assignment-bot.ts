@@ -1,6 +1,7 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { sendTaskAssignmentEmail } from './services/emails/send-task-assignment-email';
+import { buildSendGridConfig } from '../lib/notification-service';
 
 /**
  * Medplum Bot: Task Assignment Email Notification
@@ -14,12 +15,7 @@ import { sendTaskAssignmentEmail } from './services/emails/send-task-assignment-
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
-  const secrets = event.secrets;
-  const sendGridVariables = {
-    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
-  };
+  const sendGridVariables = buildSendGridConfig(event);
 
   console.log(`[TaskAssignmentBot] Processing task: ${task.id}`);
   console.log(`[TaskAssignmentBot] Owner: ${task.owner?.reference}`);

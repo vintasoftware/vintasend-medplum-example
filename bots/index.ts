@@ -28,7 +28,7 @@ export const BOTS: BotDescription[] = [
     ],
   },
   {
-    name: 'task-due-notification-bot',
+    name: 'task-due-soon-notification-bot',
     needsAdminMembership: true,
     runAsUser: true,
     criteria: 'Task?owner:missing=false',

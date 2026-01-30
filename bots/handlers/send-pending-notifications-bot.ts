@@ -1,6 +1,6 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { MedplumSingleton } from '../../lib/medplum-singleton';
-import { getNotificationService } from '../../lib/notification-service';
+import { buildSendGridConfig, getNotificationService } from '../../lib/notification-service';
 
 /**
  * Medplum Bot: Send Pending Notifications
@@ -16,12 +16,7 @@ import { getNotificationService } from '../../lib/notification-service';
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   console.log('[SendPendingNotificationsBot] Starting to process pending notifications');
-  const secrets = event.secrets;
-  const sendgridConfig = {
-    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
-  };
+  const sendgridConfig = buildSendGridConfig(event);
 
   try {
     MedplumSingleton.setInstance(medplum);

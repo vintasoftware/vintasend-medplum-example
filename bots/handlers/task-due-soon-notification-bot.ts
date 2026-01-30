@@ -1,6 +1,7 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
+import { buildSendGridConfig } from '../../lib/notification-service';
 
 /**
  * Medplum Bot: Task Due Soon Notification
@@ -26,12 +27,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
   console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
 
   const appBaseUrl = process.env.APP_BASE_URL || 'https://vintasend-medplum-example.com';
-  const secrets = event.secrets;
-  const sendgridConfig = {
-    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
-  };
+  const sendgridConfig = buildSendGridConfig(event);
 
   // Check if task has a due date
   const dueDate = task.restriction?.period?.end;

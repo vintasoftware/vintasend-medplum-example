@@ -1,4 +1,5 @@
 import { MedplumClient } from '@medplum/core';
+import type { BotEvent } from '@medplum/core';
 import type { ContextGenerator } from 'vintasend';
 import { VintaSendFactory } from 'vintasend';
 import { MedplumSingleton } from './medplum-singleton';
@@ -171,6 +172,18 @@ export type SendGridConfig = {
   SENDGRID_FROM_EMAIL: string;
   SENDGRID_FROM_NAME: string;
 };
+
+/**
+ * Helper function to build SendGridConfig from bot event secrets
+ * Reduces duplication across bot handlers
+ */
+export function buildSendGridConfig(event: BotEvent): SendGridConfig {
+  return {
+    SENDGRID_API_KEY: event.secrets.SENDGRID_API_KEY.valueString || '',
+    SENDGRID_FROM_EMAIL: event.secrets.SENDGRID_FROM_EMAIL.valueString || '',
+    SENDGRID_FROM_NAME: event.secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
+  };
+}
 
 export function getNotificationService(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
