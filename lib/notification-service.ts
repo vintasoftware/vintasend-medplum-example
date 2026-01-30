@@ -176,12 +176,29 @@ export type SendGridConfig = {
 /**
  * Helper function to build SendGridConfig from bot event secrets
  * Reduces duplication across bot handlers
+ * Throws if required secrets (API key or from email) are missing
  */
 export function buildSendGridConfig(event: BotEvent): SendGridConfig {
+  const apiKey = event.secrets.SENDGRID_API_KEY?.valueString;
+  const fromEmail = event.secrets.SENDGRID_FROM_EMAIL?.valueString;
+  const fromName = event.secrets.SENDGRID_FROM_NAME?.valueString || 'Medplum Notifications';
+
+  if (!apiKey) {
+    // eslint-disable-next-line no-console
+    console.error('[buildSendGridConfig] SENDGRID_API_KEY secret is missing or empty');
+    throw new Error('SENDGRID_API_KEY must be configured in bot secrets');
+  }
+
+  if (!fromEmail) {
+    // eslint-disable-next-line no-console
+    console.error('[buildSendGridConfig] SENDGRID_FROM_EMAIL secret is missing or empty');
+    throw new Error('SENDGRID_FROM_EMAIL must be configured in bot secrets');
+  }
+
   return {
-    SENDGRID_API_KEY: event.secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: event.secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: event.secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
+    SENDGRID_API_KEY: apiKey,
+    SENDGRID_FROM_EMAIL: fromEmail,
+    SENDGRID_FROM_NAME: fromName,
   };
 }
 

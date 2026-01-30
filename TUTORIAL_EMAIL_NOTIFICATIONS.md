@@ -389,17 +389,19 @@ Create [bots/services/emails/send-task-assignment-email.ts](bots/services/emails
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
-import { getNotificationService } from '../../../lib/notification-service';
+import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
 import { formatPatientNameWithPreferredName } from '../../../lib/patients';
 
 export async function sendTaskAssignmentEmail(
-  medplum: MedplumClient, 
-  task: Task, 
-  taskLinkBaseUrl: string
+  medplum: MedplumClient,
+  task: Task,
+  taskLinkBaseUrl: string,
+  sendgridConfig: SendGridConfig
 ) {
   /* sends a task assignment email to a practitioner */
 
   if (!task.owner?.reference) {
+    // eslint-disable-next-line no-console
     console.error('[sendTaskAssignmentEmail] Task has no owner reference');
     throw new Error('Task must have an owner reference');
   }
@@ -408,6 +410,7 @@ export async function sendTaskAssignmentEmail(
 
   // Validate format (should be "ResourceType/id")
   if (!referenceString.includes('/')) {
+    // eslint-disable-next-line no-console
     console.error('[sendTaskAssignmentEmail] Invalid referenceString format:', referenceString);
     throw new Error(`Invalid referenceString format: ${referenceString}`);
   }
@@ -415,15 +418,23 @@ export async function sendTaskAssignmentEmail(
   // Skip sending email if task is assigned to a Group
   const [resourceType] = referenceString.split('/');
   if (resourceType === 'Group') {
+    // eslint-disable-next-line no-console
     console.log('[sendTaskAssignmentEmail] Task assigned to Group, skipping email notification');
     return;
   }
 
   MedplumSingleton.setInstance(medplum);
-  const vintasend = getNotificationService(medplum);
+  const vintasend = getNotificationService(medplum, sendgridConfig);
 
   try {
     const taskTitle = task.code?.text || task.description || 'New Task';
+
+    if (!task.id) {
+      // eslint-disable-next-line no-console
+      console.error('[sendTaskAssignmentEmail] Task has no id');
+      throw new Error('Task must have an id to send task assignment email');
+    }
+
     const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
     const taskIsUrgent = task.priority === 'urgent';
 
@@ -435,6 +446,7 @@ export async function sendTaskAssignmentEmail(
           requesterName = formatPatientNameWithPreferredName(requester.name[0]);
         }
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error('[sendTaskAssignmentEmail] Error fetching requester:', error);
       }
     }
@@ -458,8 +470,10 @@ export async function sendTaskAssignmentEmail(
       extraParams: {},
     });
 
+    // eslint-disable-next-line no-console
     console.log('[sendTaskAssignmentEmail] Email sent successfully to:', referenceString);
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('[sendTaskAssignmentEmail] Error creating/sending notification:', error);
     throw error;
   }
@@ -554,19 +568,21 @@ Create the main bot file that will be executed by the subscription at [bots/task
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { sendTaskAssignmentEmail } from './services/emails/send-task-assignment-email';
+import { buildSendGridConfig } from '../lib/notification-service';
 
 /**
  * Medplum Bot: Task Assignment Email Notification
- * 
+ *
  * This bot is triggered by a subscription when a Task is created or updated
  * with an owner. It sends an email notification to the assigned practitioner.
- * 
+ *
  * Subscription Criteria: Task?owner:exists=true
  * Triggers: create, update
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
+  const sendGridVariables = buildSendGridConfig(event);
 
   console.log(`[TaskAssignmentBot] Processing task: ${task.id}`);
   console.log(`[TaskAssignmentBot] Owner: ${task.owner?.reference}`);
@@ -576,7 +592,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
 
     try {
-      await sendTaskAssignmentEmail(medplum, task, appBaseUrl);
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
       console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);
     } catch (error) {
       console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);
@@ -929,95 +945,81 @@ import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
 import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+import {
+  assertTaskOwnerReference,
+  getValidTaskDueDate,
+  parseOwnerReference,
+  computeReminderTime,
+} from '../../shared/task-due-soon-helpers';
 
 export async function scheduleTaskDueSoonEmail(
-  medplum: MedplumClient, 
-  task: Task, 
-  taskLinkBaseUrl: string, 
+  medplum: MedplumClient,
+  task: Task,
+  taskLinkBaseUrl: string,
   sendgridConfig: SendGridConfig
 ) {
   /* sends a task due soon reminder email to a practitioner 24 hours before the task is due */
 
-  if (!task.owner?.reference) {
-    console.error('[scheduleTaskDueSoonEmail] Task has no owner reference');
-    throw new Error('Task must have an owner reference');
+  const ownerRef = assertTaskOwnerReference(task);
+  const parsedOwner = parseOwnerReference(ownerRef);
+  if (!parsedOwner) {
+    return;
   }
 
-  if (!task.restriction?.period?.end) {
-    console.error('[scheduleTaskDueSoonEmail] Task has no due date');
-    throw new Error('Task must have a due date (restriction.period.end)');
+  const dueDate = getValidTaskDueDate(task);
+
+  if (!task.id) {
+    // eslint-disable-next-line no-console
+    console.error('[scheduleTaskDueSoonEmail] Task has no id');
+    throw new Error('Task must have an id to send task due soon email');
   }
 
-  const referenceString = task.owner.reference;
-
-  // Validate format (should be "ResourceType/id")
-  if (!referenceString.includes('/')) {
-    console.error('[scheduleTaskDueSoonEmail] Invalid referenceString format:', referenceString);
-    throw new Error(`Invalid referenceString format: ${referenceString}`);
-  }
-
-  // Skip sending email if task is assigned to a Group
-  const [resourceType] = referenceString.split('/');
-  if (resourceType === 'Group') {
-    console.log('[scheduleTaskDueSoonEmail] Task assigned to Group, skipping email notification');
+  const sendAfter = computeReminderTime(dueDate, 24);
+  if (!sendAfter) {
     return;
   }
 
   MedplumSingleton.setInstance(medplum);
   const vintasend = getNotificationService(medplum, sendgridConfig);
 
+  const taskTitle = task.code?.text || task.description || 'Task';
+  const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
+  const taskIsUrgent = task.priority === 'urgent';
+  const formattedDueDate = dueDate.toLocaleString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
   try {
-    const taskTitle = task.code?.text || task.description || 'Task';
-
-    if (!task.id) {
-      console.error('[scheduleTaskDueSoonEmail] Task has no id');
-      throw new Error('Task must have an id to send task due soon email');
-    }
-
-    const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
-    const taskIsUrgent = task.priority === 'urgent';
-    const dueDate = new Date(task.restriction.period.end);
-    const formattedDueDate = dueDate.toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    // Schedule notification to be sent 24 hours before due date
-    const sendAfter = new Date(dueDate.getTime() - 24 * 60 * 60 * 1000);
-
-    // Only schedule if sendAfter is in the future
-    if (sendAfter <= new Date()) {
-      console.log('[scheduleTaskDueSoonEmail] Task due date is within 24 hours or past, skipping');
-      return;
-    }
-
     await vintasend.createNotification({
-      userId: referenceString,
+      userId: ownerRef,
       notificationType: 'EMAIL' as const,
       title: 'Task Due Soon Reminder',
       contextName: 'taskDueSoon' as const,
       contextParameters: {
-        userId: referenceString,
+        userId: ownerRef,
         taskTitle,
         taskDescription: task.description || '',
         taskIsUrgent,
         taskLink,
         dueDate: formattedDueDate,
       },
-      sendAfter, // 🔑 This is the key - schedule for future delivery
+      sendAfter,
       bodyTemplate: 'emails/task-due-soon/body.html.pug',
       subjectTemplate: 'emails/task-due-soon/subject.txt.pug',
       extraParams: {},
     });
 
+    // eslint-disable-next-line no-console
     console.log(
-      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString}`
+      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${ownerRef} for task due on ${dueDate.toISOString()}`
     );
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('[scheduleTaskDueSoonEmail] Error creating/sending notification:', error);
     throw error;
   }
@@ -1025,8 +1027,12 @@ export async function scheduleTaskDueSoonEmail(
 ```
 
 **Key Points:**
+- Uses helper functions from `task-due-soon-helpers.ts` for validation and date calculations
+- `assertTaskOwnerReference` validates and returns the owner reference
+- `parseOwnerReference` validates the reference format and filters out Group assignments
+- `getValidTaskDueDate` validates the due date and returns a Date object
+- `computeReminderTime` calculates when to send the reminder (24 hours before) and validates it's in the future
 - The `sendAfter` parameter tells VintaSend when to send the notification
-- We calculate it as 24 hours before the task's due date
 - The notification is stored with status `pending` until `sendAfter` time
 - Context is fetched at send-time, not when scheduled
 
@@ -1038,6 +1044,8 @@ Create [bots/handlers/task-due-soon-notification-bot.ts](bots/handlers/task-due-
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
+import { buildSendGridConfig } from '../../lib/notification-service';
+import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers';
 
 /**
  * Medplum Bot: Task Due Soon Notification
@@ -1054,21 +1062,50 @@ import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-s
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   const task = event.input as Task;
+  const result = getTaskDueSoonSchedulingReason(task);
 
-  if (!task || task.resourceType !== 'Task') {
-    console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
-    return { message: 'Invalid task resource' };
+  switch (result.kind) {
+    case 'invalidResource':
+      console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
+      return { message: 'Invalid task resource' };
+    case 'noDueDate':
+      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no due date, skipping`);
+      return { message: 'No due date set', taskId: task?.id };
+    case 'invalidDueDate':
+      console.warn(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} has invalid due date: ${result.dueDate}, skipping`
+      );
+      return { message: 'Invalid due date', taskId: task?.id, dueDate: result.dueDate };
+    case 'finalState':
+      console.log(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} is in final state (${result.status}), skipping`
+      );
+      return { message: `Task in final state: ${result.status}`, taskId: task?.id };
+    case 'noOwner':
+      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no owner, skipping`);
+      return { message: 'No owner assigned', taskId: task?.id };
+    case 'tooSoon':
+      console.log(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} is due in ${result.hoursUntilDue.toFixed(
+          2
+        )} hours (less than 24), skipping`
+      );
+      return {
+        message: 'Due date is less than 24 hours away',
+        taskId: task?.id,
+        hoursUntilDue: result.hoursUntilDue,
+      };
+    case 'ok':
+      break;
   }
 
-  console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
+  const appBaseUrl = process.env.APP_BASE_URL;
+  if (!appBaseUrl) {
+    console.error('[TaskDueSoonNotificationBot] APP_BASE_URL environment variable is not set');
+    throw new Error('APP_BASE_URL must be configured');
+  }
 
-  const appBaseUrl = process.env.APP_BASE_URL || 'https://vintasend-medplum-example.com';
-  const secrets = event.secrets;
-  const sendgridConfig = {
-    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
-  };
+  const sendgridConfig = buildSendGridConfig(event);
 
   // Check if task has a due date
   const dueDate = task.restriction?.period?.end;
@@ -1105,15 +1142,17 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
   try {
     // Schedule the notification to be sent 24 hours before the due date
     console.log(
-      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(2)} hours`
+      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(
+        2
+      )} hours`
     );
     await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
     return {
       message: 'Notification scheduled successfully',
       taskId: task.id,
-      dueDate,
-      hoursUntilDue: hoursUntilDue.toFixed(2),
+      dueDate: task.restriction?.period?.end,
+      hoursUntilDue: result.hoursUntilDue.toFixed(2),
     };
   } catch (error) {
     console.error(`[TaskDueSoonNotificationBot] Error scheduling notification for task ${task.id}:`, error);
@@ -1123,9 +1162,10 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 ```
 
 **Key Differences from Task Assignment Bot:**
-- **Event-Driven**: Triggers on Task creation/update (via subscription), not periodic checks
-- **Validation**: Checks for due date, owner, and task status before scheduling
-- **Time Check**: Only schedules if task is due more than 24 hours from now
+- **Uses Helper Function**: Uses `getTaskDueSoonSchedulingReason` to consolidate validation logic
+- **Structured Validation**: All validation checks return specific error kinds via discriminated union
+- **Invalid Date Handling**: Detects and skips tasks with invalid due dates
+- **Required Configuration**: Throws if `APP_BASE_URL` is not configured (fails fast)
 - **Scheduling**: Uses `sendAfter` to schedule the notification for 24 hours before due date
 
 ### Step 5: Create the Send Pending Notifications Bot
@@ -1137,7 +1177,7 @@ Create [bots/handlers/send-pending-notifications-bot.ts](bots/handlers/send-pend
 ```typescript
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { MedplumSingleton } from '../../lib/medplum-singleton';
-import { getNotificationService } from '../../lib/notification-service';
+import { getNotificationService, buildSendGridConfig } from '../../lib/notification-service';
 
 /**
  * Medplum Bot: Send Pending Notifications
@@ -1154,12 +1194,7 @@ import { getNotificationService } from '../../lib/notification-service';
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   console.log('[SendPendingNotificationsBot] Starting to process pending notifications');
   
-  const secrets = event.secrets;
-  const sendgridConfig = {
-    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
-    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
-    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
-  };
+  const sendgridConfig = buildSendGridConfig(event);
 
   try {
     MedplumSingleton.setInstance(medplum);
