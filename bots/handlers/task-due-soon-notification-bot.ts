@@ -1,6 +1,6 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
-import { sendTaskDueSoonEmail } from '../services/emails/send-task-due-soon-email';
+import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
 
 /**
  * Medplum Bot: Task Due Soon Notification
@@ -70,7 +70,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     console.log(
       `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(2)} hours`
     );
-    await sendTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
+    await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
     return {
       message: 'Notification scheduled successfully',

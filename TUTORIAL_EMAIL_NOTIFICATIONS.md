@@ -922,7 +922,7 @@ export const contextGeneratorsMap = {
 
 ### Step 3: Create the Task Due Soon Email Service
 
-Create [bots/services/emails/send-task-due-soon-email.ts](bots/services/emails/send-task-due-soon-email.ts):
+Create [bots/services/emails/schedule-task-due-soon-email.ts](bots/services/emails/schedule-task-due-soon-email.ts):
 
 ```typescript
 import { MedplumClient } from '@medplum/core';
@@ -930,7 +930,7 @@ import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
 import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
 
-export async function sendTaskDueSoonEmail(
+export async function scheduleTaskDueSoonEmail(
   medplum: MedplumClient, 
   task: Task, 
   taskLinkBaseUrl: string, 
@@ -939,12 +939,12 @@ export async function sendTaskDueSoonEmail(
   /* sends a task due soon reminder email to a practitioner 24 hours before the task is due */
 
   if (!task.owner?.reference) {
-    console.error('[sendTaskDueSoonEmail] Task has no owner reference');
+    console.error('[scheduleTaskDueSoonEmail] Task has no owner reference');
     throw new Error('Task must have an owner reference');
   }
 
   if (!task.restriction?.period?.end) {
-    console.error('[sendTaskDueSoonEmail] Task has no due date');
+    console.error('[scheduleTaskDueSoonEmail] Task has no due date');
     throw new Error('Task must have a due date (restriction.period.end)');
   }
 
@@ -952,14 +952,14 @@ export async function sendTaskDueSoonEmail(
 
   // Validate format (should be "ResourceType/id")
   if (!referenceString.includes('/')) {
-    console.error('[sendTaskDueSoonEmail] Invalid referenceString format:', referenceString);
+    console.error('[scheduleTaskDueSoonEmail] Invalid referenceString format:', referenceString);
     throw new Error(`Invalid referenceString format: ${referenceString}`);
   }
 
   // Skip sending email if task is assigned to a Group
   const [resourceType] = referenceString.split('/');
   if (resourceType === 'Group') {
-    console.log('[sendTaskDueSoonEmail] Task assigned to Group, skipping email notification');
+    console.log('[scheduleTaskDueSoonEmail] Task assigned to Group, skipping email notification');
     return;
   }
 
@@ -970,7 +970,7 @@ export async function sendTaskDueSoonEmail(
     const taskTitle = task.code?.text || task.description || 'Task';
 
     if (!task.id) {
-      console.error('[sendTaskDueSoonEmail] Task has no id');
+      console.error('[scheduleTaskDueSoonEmail] Task has no id');
       throw new Error('Task must have an id to send task due soon email');
     }
 
@@ -991,7 +991,7 @@ export async function sendTaskDueSoonEmail(
 
     // Only schedule if sendAfter is in the future
     if (sendAfter <= new Date()) {
-      console.log('[sendTaskDueSoonEmail] Task due date is within 24 hours or past, skipping');
+      console.log('[scheduleTaskDueSoonEmail] Task due date is within 24 hours or past, skipping');
       return;
     }
 
@@ -1015,10 +1015,10 @@ export async function sendTaskDueSoonEmail(
     });
 
     console.log(
-      `[sendTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString}`
+      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString}`
     );
   } catch (error) {
-    console.error('[sendTaskDueSoonEmail] Error creating/sending notification:', error);
+    console.error('[scheduleTaskDueSoonEmail] Error creating/sending notification:', error);
     throw error;
   }
 }
@@ -1030,31 +1030,39 @@ export async function sendTaskDueSoonEmail(
 - The notification is stored with status `pending` until `sendAfter` time
 - Context is fetched at send-time, not when scheduled
 
-### Step 4: Create the Periodic Bot to Check for Tasks Due Soon
+### Step 4: Create the Subscription Bot for Task Due Soon
 
 Create [bots/handlers/task-due-soon-notification-bot.ts](bots/handlers/task-due-soon-notification-bot.ts):
 
 ```typescript
 import { BotEvent, MedplumClient } from '@medplum/core';
-import { sendTaskDueSoonEmail } from '../services/emails/send-task-due-soon-email';
+import { Task } from '@medplum/fhirtypes';
+import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
 
 /**
  * Medplum Bot: Task Due Soon Notification
  * 
- * This bot runs periodically (every 5 minutes) to check for tasks that are
- * due in approximately 24-25 hours and schedules email notifications to be
- * sent 24 hours before the task due date.
+ * This bot triggers on Task creation/update and schedules email notifications
+ * to be sent 24 hours before the task due date.
  * 
  * The bot uses VintaSend's scheduled messages (sendAfter) to ensure
- * notifications are sent at the appropriate time.
+ * notifications are sent at the appropriate time. The actual sending is
+ * handled by the send-pending-notifications-bot.
  * 
- * Cron: */5 * * * * (every 5 minutes)
+ * Subscription: Task (create/update)
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
-  console.log('[TaskDueSoonNotificationBot] Starting periodic check for tasks due in ~24 hours');
+  const task = event.input as Task;
 
-  const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
+  if (!task || task.resourceType !== 'Task') {
+    console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
+    return { message: 'Invalid task resource' };
+  }
+
+  console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
+
+  const appBaseUrl = process.env.APP_BASE_URL || 'https://vintasend-medplum-example.com';
   const secrets = event.secrets;
   const sendgridConfig = {
     SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
@@ -1062,72 +1070,63 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
   };
 
-  // Calculate the time window: 24-25 hours from now
-  // We use a 1-hour window to catch tasks that will be due soon
+  // Check if task has a due date
+  const dueDate = task.restriction?.period?.end;
+  if (!dueDate) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no due date, skipping`);
+    return { message: 'No due date set', taskId: task.id };
+  }
+
+  // Check if task is in a final state (completed, cancelled, etc.)
+  const finalStates = ['completed', 'cancelled', 'failed', 'rejected', 'entered-in-error'];
+  if (task.status && finalStates.includes(task.status)) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} is in final state (${task.status}), skipping`);
+    return { message: `Task in final state: ${task.status}`, taskId: task.id };
+  }
+
+  // Check if task has an owner
+  if (!task.owner) {
+    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no owner, skipping`);
+    return { message: 'No owner assigned', taskId: task.id };
+  }
+
+  // Calculate if the due date is more than 24 hours away
   const now = new Date();
-  const windowStart = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
-  const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000); // 25 hours from now
+  const dueDateTime = new Date(dueDate);
+  const hoursUntilDue = (dueDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  if (hoursUntilDue < 24) {
+    console.log(
+      `[TaskDueSoonNotificationBot] Task ${task.id} is due in ${hoursUntilDue.toFixed(2)} hours (less than 24), skipping`
+    );
+    return { message: 'Due date is less than 24 hours away', taskId: task.id, hoursUntilDue };
+  }
 
   try {
-    // Search for tasks that:
-    // 1. Have an owner (assigned to someone)
-    // 2. Are not completed or cancelled
-    // 3. Have a due date (restriction.period.end) within the 24-25 hour window
-    const searchResults = await medplum.search('Task', {
-      'owner:missing': 'false',
-      'status:not': 'completed,cancelled,failed,rejected,entered-in-error',
-      // FHIR date search uses the format: ge (greater or equal) and lt (less than)
-      'restriction-date': `ge${windowStart.toISOString()}&restriction-date=lt${windowEnd.toISOString()}`,
-    });
-
-    const tasks = searchResults.entry?.map((e) => e.resource) || [];
-    
-    console.log(`[TaskDueSoonNotificationBot] Found ${tasks.length} tasks due in 24-25 hours`);
-
-    if (tasks.length === 0) {
-      return { message: 'No tasks to process', processedTasks: 0 };
-    }
-
-    // Process each task and schedule notifications
-    const results = await Promise.allSettled(
-      tasks.map(async (task) => {
-        if (!task || task.resourceType !== 'Task') {
-          return { status: 'skipped', reason: 'Invalid task resource' };
-        }
-        try {
-          await sendTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
-          return { taskId: task.id, status: 'success' };
-        } catch (error) {
-          console.error(`[TaskDueSoonNotificationBot] Error processing task ${task.id}:`, error);
-          return { taskId: task.id, status: 'error', error: String(error) };
-        }
-      })
-    );
-
-    const successful = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.filter((r) => r.status === 'rejected').length;
-
+    // Schedule the notification to be sent 24 hours before the due date
     console.log(
-      `[TaskDueSoonNotificationBot] Completed. Success: ${successful}, Failed: ${failed}`
+      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(2)} hours`
     );
+    await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
     return {
-      message: 'Task due soon notifications processed',
-      processedTasks: tasks.length,
-      successful,
-      failed,
+      message: 'Notification scheduled successfully',
+      taskId: task.id,
+      dueDate,
+      hoursUntilDue: hoursUntilDue.toFixed(2),
     };
   } catch (error) {
-    console.error('[TaskDueSoonNotificationBot] Error during execution:', error);
+    console.error(`[TaskDueSoonNotificationBot] Error scheduling notification for task ${task.id}:`, error);
     throw error;
   }
 }
 ```
 
-**Understanding the Time Window:**
-- We check for tasks due in 24-25 hours (a 1-hour window)
-- This prevents duplicate notifications if the bot runs multiple times
-- Tasks are found only once, when they first enter this window
+**Key Differences from Task Assignment Bot:**
+- **Event-Driven**: Triggers on Task creation/update (via subscription), not periodic checks
+- **Validation**: Checks for due date, owner, and task status before scheduling
+- **Time Check**: Only schedules if task is due more than 24 hours from now
+- **Scheduling**: Uses `sendAfter` to schedule the notification for 24 hours before due date
 
 ### Step 5: Create the Send Pending Notifications Bot
 
@@ -1215,11 +1214,20 @@ export const BOTS: BotDescription[] = [
     ],
   },
   {
-    name: 'task-due-soon-notification-bot',
+    name: 'task-due-notification-bot',
     needsAdminMembership: true,
     runAsUser: true,
-    cronString: '*/5 * * * *', // Run every 5 minutes
-    timeout: 300, // 5 minutes timeout
+    criteria: 'Task?owner:missing=false',
+    extension: [
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'create',
+      },
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'update',
+      },
+    ],
   },
   {
     name: 'send-pending-notifications-bot',
@@ -1247,59 +1255,68 @@ npm run bots:deploy
 
 Here's the complete lifecycle of a scheduled task reminder:
 
-1. **Task Created with Due Date**
-   - A Task is created with `restriction.period.end` set to a future date
+1. **Task Created/Updated with Due Date**
+   - A Task is created or updated with `restriction.period.end` set to a future date
    - Task is assigned to a practitioner via `owner` reference
+   - The subscription criteria `Task?owner:missing=false` matches this event
 
-2. **Periodic Check (Every 5 Minutes)**
-   - `task-due-soon-notification-bot` runs via cron
-   - Searches for tasks with due dates in the 24-25 hour window
-   - For each matching task, calls `sendTaskDueSoonEmail()`
+2. **Subscription Triggers Bot**
+   - Medplum evaluates the subscription and triggers `task-due-notification-bot`
+   - The bot receives the Task resource as `event.input`
 
-3. **Notification Scheduled**
-   - `sendTaskDueSoonEmail()` calls `vintasend.createNotification()`
+3. **Validation**
+   - Bot checks if task has a due date, owner, and is not in a final state
+   - Calculates hours until due date
+   - Only proceeds if task is due more than 24 hours from now
+
+4. **Notification Scheduled**
+   - Bot calls `scheduleTaskDueSoonEmail()`
+   - `scheduleTaskDueSoonEmail()` calls `vintasend.createNotification()`
    - VintaSend creates a FHIR `Communication` resource with:
      - Status: `pending`
      - `sendAfter`: Set to 24 hours before task due date
      - Context parameters stored in the Communication resource
 
-4. **Waiting Period**
+5. **Waiting Period**
    - Notification sits in the database with `pending` status
    - Task details, user data, etc. can change during this time
 
-5. **Send Time Arrives**
-   - `send-pending-notifications-bot` runs every 5 minutes
+6. **Send Time Arrives**
+   - `send-pending-notifications-bot` runs every 5 minutes via cron
    - Calls `vintasend.sendPendingNotifications()`
    - VintaSend finds all notifications where `sendAfter <= now` and status is `pending`
 
-6. **Context Generation (Fresh Data!)**
+7. **Context Generation (Fresh Data!)**
    - For each pending notification, VintaSend calls the context generator
    - `TaskDueSoonContextGenerator.generate()` fetches current user data
    - If the user's name changed since scheduling, the new name is used
    - This ensures all data in the email is current
 
-7. **Template Rendering**
+8. **Template Rendering**
    - Pug templates are rendered with fresh context
    - Email HTML and subject are generated
 
-8. **Email Sent**
+9. **Email Sent**
    - SendGrid adapter sends the email
    - `Communication` resource status updated to `sent`
    - Timestamp recorded in `sent` field
 
-9. **Error Handling**
-   - If sending fails, status is set to `failed`
-   - Error details stored in the Communication resource
-   - Failed notifications remain in the database for manual review or retry
+10. **Error Handling**
+    - If sending fails, status is set to `failed`
+    - Error details stored in the Communication resource
+    - Failed notifications remain in the database for manual review or retry
 
 ### Benefits of This Approach
 
 ✅ **Always Current Data**: Context fetched at send-time, not schedule-time  
+✅ **Event-Driven**: Notifications scheduled immediately when tasks are created/updated  
+✅ **Efficient**: Only processes relevant tasks via subscription criteria, no unnecessary searches  
 ✅ **Scheduled Delivery**: Emails sent within 5 minutes of scheduled time (based on cron frequency)  
 ✅ **Audit Trail**: Every notification stored as a FHIR `Communication` resource  
 ✅ **Status Tracking**: Monitor pending, sent, and failed notifications  
 ✅ **Scalable**: Works with any number of scheduled notifications  
 ✅ **Flexible**: Easy to add more notification types (appointment reminders, etc.)  
+✅ **No Duplicate Notifications**: Each task triggers the bot once per create/update event  
 
 ### Testing Scheduled Notifications
 

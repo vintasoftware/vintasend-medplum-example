@@ -3,7 +3,7 @@ import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
 import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
 
-export async function sendTaskDueSoonEmail(
+export async function scheduleTaskDueSoonEmail(
   medplum: MedplumClient, 
   task: Task, taskLinkBaseUrl: string, 
   sendgridConfig: SendGridConfig
@@ -12,13 +12,13 @@ export async function sendTaskDueSoonEmail(
 
   if (!task.owner?.reference) {
     // eslint-disable-next-line no-console
-    console.error('[sendTaskDueEmail] Task has no owner reference');
+    console.error('[scheduleTaskDueSoonEmail] Task has no owner reference');
     throw new Error('Task must have an owner reference');
   }
 
   if (!task.restriction?.period?.end) {
     // eslint-disable-next-line no-console
-    console.error('[sendTaskDueSoonEmail] Task has no due date');
+    console.error('[scheduleTaskDueSoonEmail] Task has no due date');
     throw new Error('Task must have a due date (restriction.period.end)');
   }
 
@@ -27,7 +27,7 @@ export async function sendTaskDueSoonEmail(
   // Validate format (should be "ResourceType/id")
   if (!referenceString.includes('/')) {
     // eslint-disable-next-line no-console
-    console.error('[sendTaskDueSoonEmail] Invalid referenceString format:', referenceString);
+    console.error('[scheduleTaskDueSoonEmail] Invalid referenceString format:', referenceString);
     throw new Error(`Invalid referenceString format: ${referenceString}`);
   }
 
@@ -35,7 +35,7 @@ export async function sendTaskDueSoonEmail(
   const [resourceType] = referenceString.split('/');
   if (resourceType === 'Group') {
     // eslint-disable-next-line no-console
-    console.log('[sendTaskDueSoonEmail] Task assigned to Group, skipping email notification');
+    console.log('[scheduleTaskDueSoonEmail] Task assigned to Group, skipping email notification');
     return;
   }
 
@@ -47,7 +47,7 @@ export async function sendTaskDueSoonEmail(
 
     if (!task.id) {
       // eslint-disable-next-line no-console
-      console.error('[sendTaskDueSoonEmail] Task has no id');
+      console.error('[scheduleTaskDueSoonEmail] Task has no id');
       throw new Error('Task must have an id to send task due soon email');
     }
 
@@ -69,7 +69,7 @@ export async function sendTaskDueSoonEmail(
     // Only schedule if sendAfter is in the future
     if (sendAfter <= new Date()) {
       // eslint-disable-next-line no-console
-      console.log('[sendTaskDueSoonEmail] Task due date is within 24 hours or past, skipping scheduled notification');
+      console.log('[scheduleTaskDueSoonEmail] Task due date is within 24 hours or past, skipping scheduled notification');
       return;
     }
 
@@ -94,11 +94,11 @@ export async function sendTaskDueSoonEmail(
 
     // eslint-disable-next-line no-console
     console.log(
-      `[sendTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString} for task due on ${dueDate.toISOString()}`
+      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString} for task due on ${dueDate.toISOString()}`
     );
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error('[sendTaskDueSoonEmail] Error creating/sending notification:', error);
+    console.error('[scheduleTaskDueSoonEmail] Error creating/sending notification:', error);
     throw error;
   }
 }
