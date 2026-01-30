@@ -800,6 +800,335 @@ Let's trace through what happens when a task is assigned:
 ✅ **FHIR-Native**: Integrates seamlessly with Medplum's FHIR data model  
 ✅ **Auditable**: All notifications are stored as FHIR resources  
 
+## Advanced: File Attachments for Task Notifications
+
+One of VintaSend's powerful features is built-in attachment management. Files are stored efficiently in Medplum as FHIR Binary resources with automatic deduplication, and can be easily attached to email notifications.
+
+In this section, we'll implement:
+- ✅ File upload utilities for tasks
+- ✅ FHIR-compliant file storage (Binary/Media resources)
+- ✅ Automatic email attachment inclusion
+- ✅ File deduplication via checksums
+- ✅ Support for multiple file types
+
+### Why Use VintaSend for Attachments?
+
+**📎 Automatic Deduplication**
+- Files with identical content stored once via checksum
+- Multiple notifications can reference the same file
+- Reduces storage costs
+
+**🔒 FHIR-Native Storage**
+- Files stored as Binary resources
+- Metadata stored as Media resources
+- Full FHIR compliance and access control
+
+**📧 Email Provider Agnostic**
+- Works with SendGrid, AWS SES, or any adapter
+- Attachment handling abstracted from email provider
+- Easy to switch providers without code changes
+
+### Prerequisites
+
+- Completed the basic task assignment tutorial
+- VintaSend and VintaSend-Medplum installed
+- Understanding of FHIR Binary and Media resources
+
+### Step 1: Understanding FHIR File Storage
+
+FHIR provides two resource types for handling files:
+
+1. **Binary Resource**: Stores the actual file content
+   - Contains raw file data (base64 encoded or direct binary)
+   - Has minimal metadata (content type, data)
+   - Used as the storage layer
+
+2. **Media Resource**: Provides file metadata and references
+   - Links to a Binary resource via `content.url`
+   - Contains rich metadata (title, creation date, subject, etc.)
+   - Used as the presentation/reference layer
+
+**Why use both?**
+
+Using Binary + Media follows FHIR best practices:
+- **Separation of concerns**: Data storage (Binary) vs metadata (Media)
+- **Reusability**: Multiple Media resources can reference the same Binary
+- **Deduplication**: VintaSend automatically detects duplicate files via checksum
+- **Access control**: Fine-grained permissions on Media without exposing Binary directly
+
+**Example FHIR Resources**:
+
+```json
+// Binary resource (stores file content)
+{
+  "resourceType": "Binary",
+  "id": "example-pdf-123",
+  "contentType": "application/pdf",
+  "data": "JVBERi0xLjQKJcOkw7zDtsOfCjIgMC..." // base64 encoded PDF
+}
+
+// Media resource (provides metadata)
+{
+  "resourceType": "Media",
+  "id": "example-media-456",
+  "status": "completed",
+  "content": {
+    "contentType": "application/pdf",
+    "url": "Binary/example-pdf-123",
+    "title": "Lab Results.pdf"
+  }
+}
+
+// Task with attachment (references Media)
+{
+  "resourceType": "Task",
+  "id": "example-task-789",
+  "status": "requested",
+  "input": [
+    {
+      "type": {
+        "coding": [{
+          "system": "http://vintasend-medplum-example.com/task-input-types",
+          "code": "attachment",
+          "display": "File Attachment"
+        }]
+      },
+      "valueReference": {
+        "reference": "Media/example-media-456"
+      }
+    }
+  ]
+}
+```
+
+### Step 2: Create File Upload Utilities
+
+Create [lib/file-upload.ts](lib/file-upload.ts):
+
+```typescript
+import { MedplumClient } from '@medplum/core';
+import { Binary, Media, Reference, Task, TaskInput } from '@medplum/fhirtypes';
+
+export interface FileUploadResult {
+  binary: Binary;
+  media: Media;
+}
+
+/**
+ * Uploads a file to Medplum and creates both Binary and Media resources.
+ */
+export async function uploadFileToMedplum(
+  medplum: MedplumClient,
+  file: File | Buffer,
+  filename: string,
+  contentType: string
+): Promise<FileUploadResult> {
+  // Create Binary resource to store the file content
+  const binary = await medplum.createBinary(file, filename, contentType);
+
+  // Create Media resource as metadata wrapper
+  const media = await medplum.createResource<Media>({
+    resourceType: 'Media',
+    status: 'completed',
+    content: {
+      contentType,
+      url: `Binary/${binary.id}`,
+      title: filename,
+    },
+  });
+
+  return { binary, media };
+}
+
+/**
+ * Attaches a Media resource to a Task by adding it to the task's input array.
+ */
+export async function attachFileToTask(
+  medplum: MedplumClient,
+  task: Task,
+  mediaReference: Reference<Media>
+): Promise<Task> {
+  const currentInputs = task.input || [];
+
+  const attachmentInput: TaskInput = {
+    type: {
+      coding: [
+        {
+          system: 'http://vintasend-medplum-example.com/task-input-types',
+          code: 'attachment',
+          display: 'File Attachment',
+        },
+      ],
+    },
+    valueReference: mediaReference,
+  };
+
+  const updatedTask = await medplum.updateResource<Task>({
+    ...task,
+    input: [...currentInputs, attachmentInput],
+  });
+
+  return updatedTask;
+}
+
+/**
+ * Retrieves all Media resources attached to a Task.
+ */
+export async function getTaskAttachments(
+  medplum: MedplumClient,
+  task: Task
+): Promise<Media[]> {
+  if (!task.input || task.input.length === 0) {
+    return [];
+  }
+
+  const attachmentInputs = task.input.filter((input) => {
+    const coding = input.type?.coding?.[0];
+    return coding?.code === 'attachment' && input.valueReference?.reference;
+  });
+
+  const mediaPromises = attachmentInputs.map(async (input): Promise<Media | null> => {
+    const reference = input.valueReference?.reference;
+    if (!reference) return null;
+
+    try {
+      const [resourceType, id] = reference.split('/');
+      if (resourceType !== 'Media' || !id) return null;
+
+      return await medplum.readResource('Media', id);
+    } catch (error) {
+      console.error(`Failed to fetch Media: ${reference}`, error);
+      return null;
+    }
+  });
+
+  const mediaResources = await Promise.all(mediaPromises);
+  return mediaResources.filter((media): media is Media => media !== null);
+}
+
+/**
+ * Gets the Binary content from a Media resource.
+ */
+export async function getBinaryFromMedia(
+  medplum: MedplumClient,
+  media: Media
+): Promise<Binary | null> {
+  const binaryUrl = media.content?.url;
+  if (!binaryUrl) return null;
+
+  try {
+    const [resourceType, id] = binaryUrl.split('/');
+    if (resourceType !== 'Binary' || !id) return null;
+
+    return await medplum.readResource('Binary', id);
+  } catch (error) {
+    console.error(`Failed to fetch Binary: ${binaryUrl}`, error);
+    return null;
+  }
+}
+```
+
+**Key Points:**
+
+- **`uploadFileToMedplum`**: Creates both Binary and Media resources in a single operation
+- **`attachFileToTask`**: Adds attachment to task's `input` array following FHIR standards
+- **`getTaskAttachments`**: Retrieves all Media resources attached to a task
+- **`getBinaryFromMedia`**: Utility to fetch the actual file content from a Media reference
+
+### Step 3: Configure File Upload Constraints
+
+Update [lib/constants.ts](lib/constants.ts) to add file upload configuration:
+
+```typescript
+/**
+ * Task attachment configuration
+ */
+export const TASK_ATTACHMENT_INPUT_TYPE = {
+  system: 'http://vintasend-medplum-example.com/task-input-types',
+  code: 'attachment',
+  display: 'File Attachment',
+};
+
+/**
+ * Maximum file size for attachments (10MB)
+ */
+export const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Allowed file types for task attachments
+ */
+export const ALLOWED_FILE_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/csv',
+];
+```
+
+**Configuration Explained:**
+
+1. **`TASK_ATTACHMENT_INPUT_TYPE`**: FHIR coding system for identifying task attachments
+   - Uses a custom system URL for your application
+   - Code `'attachment'` indicates this input is a file attachment
+   - Display name for human readability
+
+2. **`MAX_ATTACHMENT_SIZE`**: 10MB limit (10 * 1024 * 1024 bytes)
+   - Prevents excessive storage usage
+   - SendGrid has a 30MB total attachment limit per email
+   - Adjust based on your needs and email provider limits
+
+3. **`ALLOWED_FILE_TYPES`**: Whitelist of MIME types
+   - **Documents**: PDF, Word, Excel
+   - **Images**: JPEG, PNG, GIF, WebP
+   - **Text**: Plain text, CSV
+   - Add more types as needed (e.g., `'video/mp4'`, `'audio/mpeg'`)
+
+**Why restrict file types?**
+
+- **Security**: Prevent malicious file uploads (executables, scripts)
+- **Compatibility**: Ensure files can be previewed/opened by recipients
+- **Storage optimization**: Exclude large video/audio files unless needed
+- **Compliance**: Meet healthcare regulations (e.g., only allow approved formats)
+
+### Validation Best Practices
+
+When implementing file upload UI, always validate:
+
+```typescript
+function validateFile(file: File): string | null {
+  // Check file size
+  if (file.size > MAX_ATTACHMENT_SIZE) {
+    return `File too large. Maximum size is ${MAX_ATTACHMENT_SIZE / 1024 / 1024}MB`;
+  }
+
+  // Check file type
+  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    return `File type ${file.type} is not allowed`;
+  }
+
+  return null; // No errors
+}
+```
+
+### Next Steps
+
+Now that we have the foundation for file attachments:
+- ✅ FHIR Binary and Media resources explained
+- ✅ File upload utilities created
+- ✅ File constraints configured
+
+In the next phases, we'll:
+- Build the React UI for file uploads
+- Integrate attachments with email notifications
+- Add file preview capabilities
+
 ## Advanced: Scheduled Notifications with Task Due Soon Reminders
 
 One of VintaSend's most powerful features is the ability to schedule notifications for future delivery. Instead of sending an email immediately, you can specify a `sendAfter` date and VintaSend will automatically send the notification at the right time.
