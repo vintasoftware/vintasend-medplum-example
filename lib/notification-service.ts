@@ -1,4 +1,5 @@
 import { MedplumClient } from '@medplum/core';
+import type { BotEvent } from '@medplum/core';
 import type { ContextGenerator } from 'vintasend';
 import { VintaSendFactory } from 'vintasend';
 import { MedplumSingleton } from './medplum-singleton';
@@ -68,6 +69,44 @@ class TaskAssignmentContextGenerator implements ContextGenerator {
   }
 }
 
+class TaskDueSoonContextGenerator implements ContextGenerator {
+  async generate({
+    userId,
+    taskTitle,
+    taskDescription,
+    taskIsUrgent,
+    taskLink,
+    dueDate,
+  }: {
+    userId: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }): Promise<{
+    firstName: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }> {
+    const medplum = MedplumSingleton.getInstance();
+    const user = await getUserById(medplum, userId);
+    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
+
+    return {
+      firstName,
+      taskTitle,
+      taskDescription,
+      taskIsUrgent,
+      taskLink,
+      dueDate,
+    };
+  }
+}
+
 class InboxMessageContextGenerator implements ContextGenerator {
   async generate({
     userId,
@@ -118,6 +157,7 @@ class InboxMessageContextGenerator implements ContextGenerator {
 // context map for generating the context of each notification
 export const contextGeneratorsMap = {
   taskAssignment: new TaskAssignmentContextGenerator(),
+  taskDueSoon: new TaskDueSoonContextGenerator(),
   inboxMessage: new InboxMessageContextGenerator(),
 } as const;
 
@@ -127,21 +167,50 @@ export type NotificationTypeConfig = {
   UserIdType: string;
 };
 
-export type SendGridVariables = {
+export type SendGridConfig = {
   SENDGRID_API_KEY: string;
   SENDGRID_FROM_EMAIL: string;
   SENDGRID_FROM_NAME: string;
 };
 
-export function getNotificationService(medplum: MedplumClient, variables: SendGridVariables) {
+/**
+ * Helper function to build SendGridConfig from bot event secrets
+ * Reduces duplication across bot handlers
+ * Throws if required secrets (API key or from email) are missing
+ */
+export function buildSendGridConfig(event: BotEvent): SendGridConfig {
+  const apiKey = event.secrets.SENDGRID_API_KEY?.valueString;
+  const fromEmail = event.secrets.SENDGRID_FROM_EMAIL?.valueString;
+  const fromName = event.secrets.SENDGRID_FROM_NAME?.valueString || 'Medplum Notifications';
+
+  if (!apiKey) {
+    // eslint-disable-next-line no-console
+    console.error('[buildSendGridConfig] SENDGRID_API_KEY secret is missing or empty');
+    throw new Error('SENDGRID_API_KEY must be configured in bot secrets');
+  }
+
+  if (!fromEmail) {
+    // eslint-disable-next-line no-console
+    console.error('[buildSendGridConfig] SENDGRID_FROM_EMAIL secret is missing or empty');
+    throw new Error('SENDGRID_FROM_EMAIL must be configured in bot secrets');
+  }
+
+  return {
+    SENDGRID_API_KEY: apiKey,
+    SENDGRID_FROM_EMAIL: fromEmail,
+    SENDGRID_FROM_NAME: fromName,
+  };
+}
+
+export function getNotificationService(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
     compiledTemplates
   );
   const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
-    apiKey: variables.SENDGRID_API_KEY || '',
-    fromEmail: variables.SENDGRID_FROM_EMAIL || '',
-    fromName: variables.SENDGRID_FROM_NAME,
+    apiKey: sendgridConfig.SENDGRID_API_KEY || '',
+    fromEmail: sendgridConfig.SENDGRID_FROM_EMAIL || '',
+    fromName: sendgridConfig.SENDGRID_FROM_NAME,
   });
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
