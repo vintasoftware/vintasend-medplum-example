@@ -1508,6 +1508,410 @@ Next, we'll integrate these attachments with email notifications so files are au
 
 ---
 
+### Step 5: Add Attachment Support to Email Notifications
+
+Now that we have the UI for uploading files to tasks, let's integrate those attachments with our email notification system so that files are automatically included when task assignment emails are sent.
+
+#### 5.1: Add Attachment Conversion Function
+
+First, we need to add a function that converts FHIR Media/Binary resources to the format expected by VintaSend for email attachments.
+
+Update [lib/notification-service.ts](lib/notification-service.ts) to import the file upload utilities:
+
+```typescript
+import type { Media } from '@medplum/fhirtypes';
+import { getBinaryFromMedia } from './file-upload';
+```
+
+Then add the `convertMediaToAttachment` function after the `getUserById` function:
+
+```typescript
+/**
+ * Converts a Media resource to VintaSend attachment format.
+ * 
+ * Fetches the Binary resource referenced by the Media and extracts the file data,
+ * then returns it in the format expected by VintaSend for email attachments.
+ * 
+ * @param medplum - The Medplum client instance
+ * @param media - The Media resource containing the file metadata
+ * @returns A NotificationAttachmentUpload object with file, filename, and contentType
+ * 
+ * @example
+ * const attachment = await convertMediaToAttachment(medplum, media);
+ * // { file: Buffer, filename: 'document.pdf', contentType: 'application/pdf' }
+ */
+export async function convertMediaToAttachment(
+  medplum: MedplumClient,
+  media: Media
+): Promise<{
+  file: Buffer;
+  filename: string;
+  contentType: string;
+} | null> {
+  try {
+    // Fetch Binary resource from media.content.url
+    const binary = await getBinaryFromMedia(medplum, media);
+    
+    if (!binary) {
+      console.error('[convertMediaToAttachment] Failed to fetch Binary resource for Media:', media.id);
+      return null;
+    }
+
+    // Extract file data - Binary.data is base64-encoded
+    let file: Buffer;
+    if (binary.data) {
+      // If data is embedded in the Binary resource as base64
+      file = Buffer.from(binary.data, 'base64');
+    } else {
+      // If Binary is stored externally, we need to fetch it via URL
+      // This is handled by getBinaryFromMedia
+      console.error('[convertMediaToAttachment] Binary resource has no data:', binary.id);
+      return null;
+    }
+
+    // Return in VintaSend NotificationAttachmentUpload format
+    return {
+      file,
+      filename: media.content?.title || 'attachment',
+      contentType: media.content?.contentType || 'application/octet-stream',
+    };
+  } catch (error) {
+    console.error('[convertMediaToAttachment] Error converting Media to attachment:', error);
+    return null;
+  }
+}
+```
+
+**How it works:**
+
+1. **Fetch Binary**: Retrieves the Binary resource from the Media reference
+2. **Extract Content**: Decodes the base64-encoded file data into a Buffer
+3. **Format for VintaSend**: Returns a `NotificationAttachmentUpload` object with `file`, `filename`, and `contentType`
+4. **Error Handling**: Returns `null` if conversion fails (which we filter out later)
+
+Also update the `TaskAssignmentContextGenerator` to accept and return `attachmentCount`:
+
+```typescript
+class TaskAssignmentContextGenerator implements ContextGenerator {
+  async generate({
+    userId,
+    taskTitle,
+    taskDescription,
+    taskIsUrgent,
+    taskLink,
+    requesterName,
+    attachmentCount,
+  }: {
+    userId: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    requesterName: string;
+    attachmentCount?: number;
+  }): Promise<{
+    firstName: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    requesterName: string;
+    attachmentCount: number;
+  }> {
+    const medplum = MedplumSingleton.getInstance();
+    const user = await getUserById(medplum, userId);
+    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
+
+    return {
+      firstName,
+      taskTitle,
+      taskDescription,
+      taskIsUrgent,
+      taskLink,
+      requesterName,
+      attachmentCount: attachmentCount || 0,
+    };
+  }
+}
+```
+
+#### 5.2: Update Task Assignment Email Service
+
+Now let's update the task assignment email service to retrieve attachments from tasks and include them in the email notification.
+
+Update [bots/services/emails/send-task-assignment-email.ts](bots/services/emails/send-task-assignment-email.ts):
+
+```typescript
+import { MedplumClient } from '@medplum/core';
+import { Task } from '@medplum/fhirtypes';
+import { MedplumSingleton } from '../../../lib/medplum-singleton';
+import { getNotificationService, SendGridConfig, convertMediaToAttachment } from '../../../lib/notification-service';
+import { formatPatientNameWithPreferredName } from '../../../lib/patients';
+import { getTaskAttachments } from '../../../lib/file-upload';
+```
+
+Then update the notification creation logic to include attachments:
+
+```typescript
+// Retrieve task attachments
+const taskAttachments = await getTaskAttachments(medplum, task);
+
+console.log(`[sendTaskAssignmentEmail] Found ${taskAttachments.length} attachments for task ${task.id}`);
+
+// Convert to VintaSend attachment format
+const attachmentPromises = taskAttachments.map((media) => convertMediaToAttachment(medplum, media));
+const attachmentResults = await Promise.all(attachmentPromises);
+
+// Filter out null values (failed conversions)
+const attachments = attachmentResults.filter((attachment): attachment is NonNullable<typeof attachment> => 
+  attachment !== null
+);
+
+console.log(`[sendTaskAssignmentEmail] Successfully converted ${attachments.length} attachments`);
+
+await vintasend.createNotification({
+  userId: referenceString,
+  notificationType: 'EMAIL' as const,
+  title: 'Task Assignment',
+  contextName: 'taskAssignment' as const,
+  contextParameters: {
+    userId: referenceString,
+    taskTitle,
+    taskDescription: task.description || '',
+    taskIsUrgent,
+    taskLink,
+    requesterName,
+    attachmentCount: attachments.length, // NEW: Pass attachment count to template
+  },
+  sendAfter: new Date(),
+  bodyTemplate: 'emails/task-assignment/body.html.pug',
+  subjectTemplate: 'emails/task-assignment/subject.txt.pug',
+  attachments, // NEW: Add attachments to the notification
+  extraParams: {},
+});
+```
+
+**Key changes:**
+
+1. **Retrieve Attachments**: Use `getTaskAttachments` to get all Media resources from `task.input`
+2. **Convert to VintaSend Format**: Map each Media to an attachment object with `convertMediaToAttachment`
+3. **Filter Failures**: Remove any null results from failed conversions
+4. **Pass to VintaSend**: Include `attachments` array and `attachmentCount` in notification
+5. **Logging**: Added console logs for debugging attachment processing
+
+#### 5.3: Update Email Template
+
+Finally, let's update the email template to inform users when attachments are included.
+
+Update [notification-templates/emails/task-assignment/body.html.pug](notification-templates/emails/task-assignment/body.html.pug):
+
+```pug
+doctype html
+html
+  head
+    meta(charset='utf-8')
+    style.
+      body {
+        white-space: pre-line;
+      }
+  body
+    h1 Task Assigned
+
+    p Hello #{firstName},
+
+    p You have been assigned a new task by #{requesterName}.
+
+    p
+      strong Task:
+      |  #{taskTitle}
+    if taskDescription
+      p
+        strong Description:
+        |  #{taskDescription}
+    
+    if attachmentCount > 0
+      p
+        strong Attachments:
+        |  #{attachmentCount} file(s) attached
+      p Files are attached to this email for your reference.
+    
+    if taskIsUrgent
+      p
+        strong URGENT
+
+    p
+      a(href=taskLink) View Task
+
+    p Please review the task details and take appropriate action.
+```
+
+**Template changes:**
+
+- **Conditional Display**: Only show attachment info when `attachmentCount > 0`
+- **Count Display**: Shows how many files are attached
+- **User Guidance**: Informs users that files are attached to the email
+
+### How It Works: The Complete Email Attachment Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Task created with attachments via UI                    │
+│    - Files stored as Binary resources                       │
+│    - Media resources reference Binaries                     │
+│    - Task.input array contains Media references             │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Task assignment bot triggered                           │
+│    - Bot detects task.owner assignment                      │
+│    - Calls sendTaskAssignmentEmail()                        │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Retrieve attachments from task                          │
+│    - getTaskAttachments() filters task.input               │
+│    - Fetches all Media resources with type 'attachment'     │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Convert Media to VintaSend attachment format            │
+│    - convertMediaToAttachment() for each Media              │
+│    - Fetches Binary resource and extracts file data         │
+│    - Converts base64 to Buffer                              │
+│    - Returns { filename, content, contentType }             │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 5. VintaSend processes attachments                         │
+│    - MedplumAttachmentManager handles deduplication         │
+│    - Stores attachments as Binary resources (if not exists) │
+│    - Links to Communication resource                        │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 6. Email adapter attaches files                            │
+│    - SendGrid adapter receives attachment data              │
+│    - Converts to SendGrid attachment format                 │
+│    - Includes in email payload                              │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 7. Email sent with attachments                             │
+│    - Recipient receives email with files attached           │
+│    - Template shows attachment count                        │
+│    - Files ready to download from email                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Testing Email Attachments
+
+After recompiling your templates and deploying your bots, test the attachment functionality:
+
+1. **Compile templates:**
+   ```bash
+   npm run compile-templates
+   ```
+
+2. **Deploy bots:**
+   ```bash
+   npm run bots:deploy
+   ```
+
+3. **Create a task with attachments:**
+   - Upload a PDF file when creating a task
+   - Assign the task to a practitioner
+   - Check the practitioner's email
+
+4. **Verify the email:**
+   - Email should show "1 file(s) attached"
+   - Email should have the PDF attached
+   - Attachment should be downloadable
+
+5. **Test multiple attachments:**
+   - Upload 2-3 files to a task
+   - Verify all files are attached to the email
+
+6. **Test without attachments:**
+   - Create a task without files
+   - Email should not mention attachments
+   - Email should send normally
+
+### Benefits of This Approach
+
+**✅ FHIR-Compliant Storage**
+- All files stored as proper FHIR Binary/Media resources
+- Full audit trail through FHIR resource history
+- Compatible with existing Medplum security and access controls
+
+**✅ Automatic Deduplication**
+- VintaSend's MedplumAttachmentManager prevents duplicate storage
+- Same file attached to multiple emails only stored once
+- Uses checksums to identify identical files
+
+**✅ Provider-Agnostic**
+- Attachment handling abstracted from email provider
+- Easy to switch from SendGrid to AWS SES or other providers
+- No provider-specific code in your application logic
+
+**✅ Type-Safe Implementation**
+- TypeScript ensures correct file handling
+- Compile-time checks for attachment structure
+- IDE autocomplete for attachment properties
+
+**✅ Robust Error Handling**
+- Failed attachment conversions don't break email sending
+- Logging at each step for debugging
+- Graceful degradation (email sends without failed attachments)
+
+### Common Issues and Solutions
+
+**Issue: Attachments not appearing in emails**
+
+Solution: Check the logs for attachment conversion errors. Common causes:
+- Binary resource not found (invalid Media reference)
+- Binary has no data field (external storage not configured)
+- File conversion failed (corrupt file or unsupported format)
+
+**Issue: Email fails to send with large attachments**
+
+Solution: SendGrid has a 30MB total attachment limit per email:
+- Reduce MAX_ATTACHMENT_SIZE to prevent individual files being too large
+- Consider adding validation for total attachment size
+- For large files, include download links instead of attaching
+
+**Issue: Attachment filename shows as "attachment"**
+
+Solution: Ensure Media.content.title is set during upload:
+```typescript
+const media = await medplum.createResource<Media>({
+  resourceType: 'Media',
+  status: 'completed',
+  content: {
+    contentType,
+    url: `Binary/${binary.id}`,
+    title: filename, // ← Make sure this is set
+  },
+});
+```
+
+### Summary
+
+Phase 3 complete! You now have:
+- ✅ Attachment conversion from FHIR Media/Binary to VintaSend format
+- ✅ Automatic attachment retrieval for task assignments
+- ✅ Email templates showing attachment information
+- ✅ End-to-end file attachment workflow
+
+Files are now automatically attached to task assignment emails, providing recipients with all necessary context and documentation directly in their inbox.
+
+---
+
 ## Advanced: Scheduled Notifications with Task Due Soon Reminders
 
 One of VintaSend's most powerful features is the ability to schedule notifications for future delivery. Instead of sending an email immediately, you can specify a `sendAfter` date and VintaSend will automatically send the notification at the right time.

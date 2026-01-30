@@ -20,6 +20,13 @@ html
       p
         strong Description:
         |  #{taskDescription}
+    
+    if attachmentCount > 0
+      p
+        strong Attachments:
+        |  #{attachmentCount} file(s) attached
+      p Files are attached to this email for your reference.
+    
     if taskIsUrgent
       p
         strong URGENT

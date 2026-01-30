@@ -1,8 +1,9 @@
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
-import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+import { getNotificationService, SendGridConfig, convertMediaToAttachment } from '../../../lib/notification-service';
 import { formatPatientNameWithPreferredName } from '../../../lib/patients';
+import { getTaskAttachments } from '../../../lib/file-upload';
 
 export async function sendTaskAssignmentEmail(
   medplum: MedplumClient,
@@ -63,6 +64,24 @@ export async function sendTaskAssignmentEmail(
       }
     }
 
+    // Retrieve task attachments
+    const taskAttachments = await getTaskAttachments(medplum, task);
+    
+    // eslint-disable-next-line no-console
+    console.log(`[sendTaskAssignmentEmail] Found ${taskAttachments.length} attachments for task ${task.id}`);
+
+    // Convert to VintaSend attachment format
+    const attachmentPromises = taskAttachments.map((media) => convertMediaToAttachment(medplum, media));
+    const attachmentResults = await Promise.all(attachmentPromises);
+    
+    // Filter out null values (failed conversions)
+    const attachments = attachmentResults.filter((attachment): attachment is NonNullable<typeof attachment> => 
+      attachment !== null
+    );
+
+    // eslint-disable-next-line no-console
+    console.log(`[sendTaskAssignmentEmail] Successfully converted ${attachments.length} attachments`);
+
     await vintasend.createNotification({
       userId: referenceString,
       notificationType: 'EMAIL' as const,
@@ -75,10 +94,12 @@ export async function sendTaskAssignmentEmail(
         taskIsUrgent,
         taskLink,
         requesterName,
+        attachmentCount: attachments.length,
       },
       sendAfter: new Date(),
       bodyTemplate: 'emails/task-assignment/body.html.pug',
       subjectTemplate: 'emails/task-assignment/subject.txt.pug',
+      attachments, // Add attachments to the notification
       extraParams: {},
     });
 
