@@ -2,90 +2,63 @@ import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
 import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+import {
+  assertTaskOwnerReference,
+  getValidTaskDueDate,
+  parseOwnerReference,
+  computeReminderTime,
+} from '../../shared/task-due-soon-helpers';
 
 export async function scheduleTaskDueSoonEmail(
-  medplum: MedplumClient, 
-  task: Task, taskLinkBaseUrl: string, 
+  medplum: MedplumClient,
+  task: Task,
+  taskLinkBaseUrl: string,
   sendgridConfig: SendGridConfig
 ) {
   /* sends a task due soon reminder email to a practitioner 24 hours before the task is due */
 
-  if (!task.owner?.reference) {
-    // eslint-disable-next-line no-console
-    console.error('[scheduleTaskDueSoonEmail] Task has no owner reference');
-    throw new Error('Task must have an owner reference');
+  const ownerRef = assertTaskOwnerReference(task);
+  const parsedOwner = parseOwnerReference(ownerRef);
+  if (!parsedOwner) {
+    return;
   }
 
-  if (!task.restriction?.period?.end) {
+  const dueDate = getValidTaskDueDate(task);
+
+  if (!task.id) {
     // eslint-disable-next-line no-console
-    console.error('[scheduleTaskDueSoonEmail] Task has no due date');
-    throw new Error('Task must have a due date (restriction.period.end)');
+    console.error('[scheduleTaskDueSoonEmail] Task has no id');
+    throw new Error('Task must have an id to send task due soon email');
   }
 
-  const dueDate = new Date(task.restriction.period.end);
-  if (Number.isNaN(dueDate.getTime())) {
-    // eslint-disable-next-line no-console
-    console.error('[scheduleTaskDueSoonEmail] Task has invalid due date:', task.restriction.period.end);
-    throw new Error('Task must have a valid due date (restriction.period.end)');
-  }
-
-  const referenceString = task.owner.reference;
-
-  // Validate format (should be "ResourceType/id")
-  if (!referenceString.includes('/')) {
-    // eslint-disable-next-line no-console
-    console.error('[scheduleTaskDueSoonEmail] Invalid referenceString format:', referenceString);
-    throw new Error(`Invalid referenceString format: ${referenceString}`);
-  }
-
-  // Skip sending email if task is assigned to a Group
-  const [resourceType] = referenceString.split('/');
-  if (resourceType === 'Group') {
-    // eslint-disable-next-line no-console
-    console.log('[scheduleTaskDueSoonEmail] Task assigned to Group, skipping email notification');
+  const sendAfter = computeReminderTime(dueDate, 24);
+  if (!sendAfter) {
     return;
   }
 
   MedplumSingleton.setInstance(medplum);
   const vintasend = getNotificationService(medplum, sendgridConfig);
 
+  const taskTitle = task.code?.text || task.description || 'Task';
+  const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
+  const taskIsUrgent = task.priority === 'urgent';
+  const formattedDueDate = dueDate.toLocaleString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
   try {
-    const taskTitle = task.code?.text || task.description || 'Task';
-
-    if (!task.id) {
-      // eslint-disable-next-line no-console
-      console.error('[scheduleTaskDueSoonEmail] Task has no id');
-      throw new Error('Task must have an id to send task due soon email');
-    }
-
-    const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
-    const taskIsUrgent = task.priority === 'urgent';
-    const formattedDueDate = dueDate.toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    // Schedule notification to be sent 24 hours before due date
-    const sendAfter = new Date(dueDate.getTime() - 24 * 60 * 60 * 1000);
-
-    // Only schedule if sendAfter is in the future
-    if (sendAfter <= new Date()) {
-      // eslint-disable-next-line no-console
-      console.log('[scheduleTaskDueSoonEmail] Task due date is within 24 hours or past, skipping scheduled notification');
-      return;
-    }
-
     await vintasend.createNotification({
-      userId: referenceString,
+      userId: ownerRef,
       notificationType: 'EMAIL' as const,
       title: 'Task Due Soon Reminder',
       contextName: 'taskDueSoon' as const,
       contextParameters: {
-        userId: referenceString,
+        userId: ownerRef,
         taskTitle,
         taskDescription: task.description || '',
         taskIsUrgent,
@@ -100,7 +73,7 @@ export async function scheduleTaskDueSoonEmail(
 
     // eslint-disable-next-line no-console
     console.log(
-      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString} for task due on ${dueDate.toISOString()}`
+      `[scheduleTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${ownerRef} for task due on ${dueDate.toISOString()}`
     );
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -108,3 +81,4 @@ export async function scheduleTaskDueSoonEmail(
     throw error;
   }
 }
+

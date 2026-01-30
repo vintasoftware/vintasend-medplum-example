@@ -11,7 +11,7 @@ import { buildSendGridConfig, getNotificationService } from '../../lib/notificat
  * It uses VintaSend's notification service to check for notifications
  * where sendAfter <= current time and triggers their delivery.
  * 
- * Cron: 5 * * * * (every 5 minutes)
+ * Cron: every 5 minutes
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {

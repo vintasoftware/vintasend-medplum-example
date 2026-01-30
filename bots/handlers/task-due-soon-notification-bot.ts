@@ -2,6 +2,7 @@ import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
 import { buildSendGridConfig } from '../../lib/notification-service';
+import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers';
 
 /**
  * Medplum Bot: Task Due Soon Notification
@@ -18,64 +19,63 @@ import { buildSendGridConfig } from '../../lib/notification-service';
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   const task = event.input as Task;
+  const result = getTaskDueSoonSchedulingReason(task);
 
-  if (!task || task.resourceType !== 'Task') {
-    console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
-    return { message: 'Invalid task resource' };
+  switch (result.kind) {
+    case 'invalidResource':
+      console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
+      return { message: 'Invalid task resource' };
+    case 'noDueDate':
+      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no due date, skipping`);
+      return { message: 'No due date set', taskId: task?.id };
+    case 'finalState':
+      console.log(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} is in final state (${result.status}), skipping`
+      );
+      return { message: `Task in final state: ${result.status}`, taskId: task?.id };
+    case 'noOwner':
+      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no owner, skipping`);
+      return { message: 'No owner assigned', taskId: task?.id };
+    case 'tooSoon':
+      console.log(
+        `[TaskDueSoonNotificationBot] Task ${task?.id} is due in ${result.hoursUntilDue.toFixed(
+          2
+        )} hours (less than 24), skipping`
+      );
+      return {
+        message: 'Due date is less than 24 hours away',
+        taskId: task?.id,
+        hoursUntilDue: result.hoursUntilDue,
+      };
+    case 'ok':
+      break;
   }
 
-  console.log(`[TaskDueSoonNotificationBot] Processing task: ${task.id}`);
+  const appBaseUrl = process.env.APP_BASE_URL;
+  if (!appBaseUrl) {
+    console.error('[TaskDueSoonNotificationBot] APP_BASE_URL environment variable is not set');
+    throw new Error('APP_BASE_URL must be configured');
+  }
 
-  const appBaseUrl = process.env.APP_BASE_URL || 'https://vintasend-medplum-example.com';
   const sendgridConfig = buildSendGridConfig(event);
 
-  // Check if task has a due date
-  const dueDate = task.restriction?.period?.end;
-  if (!dueDate) {
-    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no due date, skipping`);
-    return { message: 'No due date set', taskId: task.id };
-  }
-
-  // Check if task is in a final state (completed, cancelled, etc.)
-  const finalStates = ['completed', 'cancelled', 'failed', 'rejected', 'entered-in-error'];
-  if (task.status && finalStates.includes(task.status)) {
-    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} is in final state (${task.status}), skipping`);
-    return { message: `Task in final state: ${task.status}`, taskId: task.id };
-  }
-
-  // Check if task has an owner
-  if (!task.owner) {
-    console.log(`[TaskDueSoonNotificationBot] Task ${task.id} has no owner, skipping`);
-    return { message: 'No owner assigned', taskId: task.id };
-  }
-
-  // Calculate if the due date is more than 24 hours away
-  const now = new Date();
-  const dueDateTime = new Date(dueDate);
-  const hoursUntilDue = (dueDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-  if (hoursUntilDue < 24) {
-    console.log(
-      `[TaskDueSoonNotificationBot] Task ${task.id} is due in ${hoursUntilDue.toFixed(2)} hours (less than 24), skipping`
-    );
-    return { message: 'Due date is less than 24 hours away', taskId: task.id, hoursUntilDue };
-  }
-
   try {
-    // Schedule the notification to be sent 24 hours before the due date
     console.log(
-      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${hoursUntilDue.toFixed(2)} hours`
+      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${result.hoursUntilDue.toFixed(
+        2
+      )} hours`
     );
     await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
     return {
       message: 'Notification scheduled successfully',
       taskId: task.id,
-      dueDate,
-      hoursUntilDue: hoursUntilDue.toFixed(2),
+      dueDate: task.restriction?.period?.end,
+      hoursUntilDue: result.hoursUntilDue.toFixed(2),
     };
   } catch (error) {
     console.error(`[TaskDueSoonNotificationBot] Error scheduling notification for task ${task.id}:`, error);
     throw error;
   }
 }
+
