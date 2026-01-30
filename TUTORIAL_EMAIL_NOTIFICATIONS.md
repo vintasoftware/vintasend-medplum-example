@@ -6,6 +6,8 @@ In this tutorial, we'll walk through implementing an email notification system f
 
 We'll be using [VintaSend](https://github.com/vintasoftware/vintasend), a powerful notification framework, along with [VintaSend-Medplum](https://github.com/vintasoftware/vintasend-medplum), which provides Medplum-specific adapters for the VintaSend framework.
 
+> **Note**: This project is based on the [Medplum Provider example application](https://github.com/medplum/medplum-provider/), which provides a comprehensive starter template for building healthcare applications with Medplum. We've extended it with VintaSend integration to demonstrate email notifications and file attachment capabilities.
+
 ## Why VintaSend?
 
 VintaSend is a flexible TypeScript package designed specifically for transactional notifications. Here's why it's a great choice:
