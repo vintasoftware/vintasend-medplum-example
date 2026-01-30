@@ -3,9 +3,11 @@
 import { Divider, Flex, Paper, Stack, Text } from '@mantine/core';
 import type { PaperProps } from '@mantine/core';
 import { getReferenceString } from '@medplum/core';
-import type { Organization, Patient, Practitioner, Reference, ResourceType, Task } from '@medplum/fhirtypes';
-import { CodeInput, DateTimeInput, ReferenceInput, ResourceInput } from '@medplum/react';
+import type { Media, Organization, Patient, Practitioner, Reference, ResourceType, Task } from '@medplum/fhirtypes';
+import { CodeInput, DateTimeInput, ReferenceInput, ResourceInput, useMedplum } from '@medplum/react';
 import React, { useEffect, useState } from 'react';
+import { getTaskAttachments } from '../../../lib/file-upload';
+import { TaskAttachmentList } from './TaskAttachmentList';
 
 interface TaskPropertiesProps extends PaperProps {
   task: Task;
@@ -14,12 +16,24 @@ interface TaskPropertiesProps extends PaperProps {
 
 export function TaskProperties(props: TaskPropertiesProps): React.JSX.Element {
   const { task: initialTask, onTaskChange, ...paperProps } = props;
+  const medplum = useMedplum();
   const [task, setTask] = useState<Task | undefined>(initialTask);
   const [dueDate, setDueDate] = useState<string | undefined>(task?.restriction?.period?.end);
+  const [attachments, setAttachments] = useState<Media[]>([]);
 
   useEffect(() => {
     setTask(initialTask);
-  }, [initialTask]);
+    
+    // Load attachments when task changes
+    const loadAttachments = async (): Promise<void> => {
+      if (initialTask) {
+        const taskAttachments = await getTaskAttachments(medplum, initialTask);
+        setAttachments(taskAttachments);
+      }
+    };
+    
+    void loadAttachments();
+  }, [initialTask, medplum]);
 
   const handleDueDateChange = async (value: string | undefined): Promise<void> => {
     setDueDate(value);
@@ -138,6 +152,18 @@ export function TaskProperties(props: TaskPropertiesProps): React.JSX.Element {
             <ResourceInput label="Encounter" resourceType="Encounter" name="encounter" defaultValue={task.encounter} />
           )}
         </Stack>
+
+        {attachments.length > 0 && (
+          <>
+            <Divider />
+            <Stack gap="xs" pt="md">
+              <Text size="sm" fw={500}>
+                Attachments
+              </Text>
+              <TaskAttachmentList attachments={attachments} readOnly />
+            </Stack>
+          </>
+        )}
       </Flex>
     </Paper>
   );

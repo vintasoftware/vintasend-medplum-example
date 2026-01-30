@@ -1124,10 +1124,389 @@ Now that we have the foundation for file attachments:
 - ✅ File upload utilities created
 - ✅ File constraints configured
 
-In the next phases, we'll:
-- Build the React UI for file uploads
-- Integrate attachments with email notifications
-- Add file preview capabilities
+Next, we'll build the React UI for file uploads and integrate with task forms.
+
+---
+
+### Step 4: Build File Upload UI Components
+
+Now let's create the React components that allow users to upload files and attach them to tasks.
+
+#### 4.1: Create the File Upload Component
+
+Create [src/components/tasks/TaskFileUpload.tsx](src/components/tasks/TaskFileUpload.tsx):
+
+```typescript
+import { useState, useCallback } from 'react';
+import { useMedplum } from '@medplum/react';
+import { FileInput, Group, Text, Alert, Progress } from '@mantine/core';
+import { IconAlertCircle } from '@tabler/icons-react';
+import type { JSX } from 'react';
+import type { Media } from '@medplum/fhirtypes';
+import { uploadFileToMedplum } from '../../../lib/file-upload';
+import { MAX_ATTACHMENT_SIZE, ALLOWED_FILE_TYPES } from '../../../lib/constants';
+
+export interface TaskFileUploadProps {
+  onFileUploaded: (media: Media) => void;
+  disabled?: boolean;
+}
+
+export function TaskFileUpload({ onFileUploaded, disabled = false }: TaskFileUploadProps): JSX.Element {
+  const medplum = useMedplum();
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const validateFile = (file: File): string | null => {
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      const maxSizeMB = MAX_ATTACHMENT_SIZE / (1024 * 1024);
+      return `File size exceeds maximum allowed size of ${maxSizeMB}MB`;
+    }
+
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      return `File type "${file.type}" is not allowed. Allowed types: PDF, images, Word documents, Excel spreadsheets, text files.`;
+    }
+
+    return null;
+  };
+
+  const handleFileChange = useCallback(
+    async (file: File | null) => {
+      if (!file) return;
+
+      const validationError = validateFile(file);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+
+      setError(null);
+      setUploading(true);
+      setUploadProgress(0);
+
+      try {
+        // Simulate progress
+        const progressInterval = setInterval(() => {
+          setUploadProgress((prev) => Math.min(prev + 10, 90));
+        }, 100);
+
+        const { media } = await uploadFileToMedplum(medplum, file, file.name, file.type);
+
+        clearInterval(progressInterval);
+        setUploadProgress(100);
+
+        onFileUploaded(media);
+
+        setTimeout(() => {
+          setUploadProgress(0);
+          setUploading(false);
+        }, 500);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to upload file');
+        setUploading(false);
+        setUploadProgress(0);
+      }
+    },
+    [medplum, onFileUploaded]
+  );
+
+  return (
+    <div>
+      <FileInput
+        label="Attach File"
+        placeholder="Click to select file"
+        accept={ALLOWED_FILE_TYPES.join(',')}
+        onChange={handleFileChange}
+        disabled={disabled || uploading}
+        clearable
+      />
+
+      {uploading && (
+        <Group mt="xs">
+          <Progress value={uploadProgress} style={{ flex: 1 }} />
+          <Text size="xs" c="dimmed">
+            {uploadProgress}%
+          </Text>
+        </Group>
+      )}
+
+      {error && (
+        <Alert icon={<IconAlertCircle size={16} />} title="Upload Error" color="red" mt="xs">
+          {error}
+        </Alert>
+      )}
+
+      <Text size="xs" c="dimmed" mt="xs">
+        Maximum file size: {MAX_ATTACHMENT_SIZE / (1024 * 1024)}MB. Allowed types: PDF, images, Word, Excel, text files.
+      </Text>
+    </div>
+  );
+}
+```
+
+**Component Features:**
+
+1. **File Validation**: Checks size and type before upload
+2. **Progress Indicator**: Shows upload progress to user
+3. **Error Handling**: Displays clear error messages
+4. **Disabled State**: Can be disabled during form submission
+5. **User Feedback**: Shows allowed file types and size limits
+
+#### 4.2: Create the Attachment List Component
+
+Create [src/components/tasks/TaskAttachmentList.tsx](src/components/tasks/TaskAttachmentList.tsx):
+
+```typescript
+import { useMedplum } from '@medplum/react';
+import type { Media } from '@medplum/fhirtypes';
+import { Badge, Group, ActionIcon, Text, Stack, Paper, Tooltip } from '@mantine/core';
+import { IconDownload, IconX, IconFile, IconFileText, IconPhoto } from '@tabler/icons-react';
+import type { JSX } from 'react';
+
+export interface TaskAttachmentListProps {
+  attachments: Media[];
+  onRemove?: (mediaId: string) => void;
+  readOnly?: boolean;
+}
+
+export function TaskAttachmentList({ 
+  attachments, 
+  onRemove, 
+  readOnly = false 
+}: TaskAttachmentListProps): JSX.Element {
+  const medplum = useMedplum();
+
+  if (attachments.length === 0) {
+    return (
+      <Text size="sm" c="dimmed">
+        No attachments
+      </Text>
+    );
+  }
+
+  const getFileIcon = (contentType?: string): JSX.Element => {
+    if (!contentType) return <IconFile size={20} />;
+    if (contentType.startsWith('image/')) return <IconPhoto size={20} />;
+    if (contentType.includes('pdf') || contentType.includes('document')) {
+      return <IconFileText size={20} />;
+    }
+    return <IconFile size={20} />;
+  };
+
+  const handleDownload = async (media: Media): Promise<void> => {
+    if (!media.content?.url) return;
+
+    try {
+      const binaryId = media.content.url.split('/')[1];
+      const url = `${medplum.getBaseUrl()}fhir/R4/Binary/${binaryId}`;
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = media.content.title || 'download';
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+    }
+  };
+
+  return (
+    <Stack gap="xs">
+      {attachments.map((media) => (
+        <Paper key={media.id} p="sm" withBorder>
+          <Group justify="space-between">
+            <Group gap="sm">
+              {getFileIcon(media.content?.contentType)}
+              <div>
+                <Text size="sm" fw={500}>
+                  {media.content?.title || 'Untitled'}
+                </Text>
+                <Badge size="xs" variant="outline">
+                  {media.content?.contentType || 'Unknown type'}
+                </Badge>
+              </div>
+            </Group>
+
+            <Group gap="xs">
+              <Tooltip label="Download file">
+                <ActionIcon
+                  variant="subtle"
+                  color="blue"
+                  onClick={() => handleDownload(media)}
+                  aria-label="Download file"
+                >
+                  <IconDownload size={18} />
+                </ActionIcon>
+              </Tooltip>
+
+              {!readOnly && onRemove && (
+                <Tooltip label="Remove attachment">
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    onClick={() => onRemove(media.id as string)}
+                    aria-label="Remove attachment"
+                  >
+                    <IconX size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+            </Group>
+          </Group>
+        </Paper>
+      ))}
+    </Stack>
+  );
+}
+```
+
+**Component Features:**
+
+1. **File Icons**: Different icons for images, documents, and generic files
+2. **Download**: Click to download any attachment
+3. **Remove**: Option to remove attachments (when not read-only)
+4. **Metadata Display**: Shows filename and file type
+5. **Responsive Layout**: Clean card-based design
+
+#### 4.3: Integrate with Task Creation Form
+
+Update [src/components/tasks/NewTaskModal.tsx](src/components/tasks/NewTaskModal.tsx) to include file uploads:
+
+```typescript
+// Add imports
+import type { Media } from '@medplum/fhirtypes';
+import { TaskFileUpload } from './TaskFileUpload';
+import { TaskAttachmentList } from './TaskAttachmentList';
+import { TASK_ATTACHMENT_INPUT_TYPE } from '../../../lib/constants';
+
+// Add state for attachments
+const [attachments, setAttachments] = useState<Media[]>([]);
+
+// Add handler functions
+const handleFileUploaded = (media: Media): void => {
+  setAttachments((prev) => [...prev, media]);
+};
+
+const handleRemoveAttachment = (mediaId: string): void => {
+  setAttachments((prev) => prev.filter((m) => m.id !== mediaId));
+};
+
+// Update task creation to include attachments
+const newTask: Task = {
+  resourceType: 'Task',
+  // ... other fields ...
+  input: attachments.map((media) => ({
+    type: {
+      coding: [TASK_ATTACHMENT_INPUT_TYPE],
+      text: 'File Attachment',
+    },
+    valueReference: createReference(media),
+  })),
+};
+
+// Add to form UI (in the description section)
+<Box>
+  <Text size="sm" fw={500} mb="xs">
+    Attachments
+  </Text>
+  <Stack gap="sm">
+    <TaskFileUpload onFileUploaded={handleFileUploaded} disabled={isSubmitting} />
+    {attachments.length > 0 && (
+      <TaskAttachmentList attachments={attachments} onRemove={handleRemoveAttachment} />
+    )}
+  </Stack>
+</Box>
+```
+
+**Integration Highlights:**
+
+1. **State Management**: Track uploaded Media resources in component state
+2. **FHIR Compliance**: Store attachments in `task.input` array following FHIR standards
+3. **User Experience**: Upload → Preview → Remove workflow
+4. **Form Reset**: Clear attachments when modal closes
+
+### How It Works: The Upload Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. User selects file in TaskFileUpload component           │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Validate file type and size                             │
+│    - Check against ALLOWED_FILE_TYPES                       │
+│    - Check against MAX_ATTACHMENT_SIZE                      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Upload to Medplum via uploadFileToMedplum()             │
+│    - Create Binary resource (stores file content)           │
+│    - Create Media resource (stores metadata)                │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Add Media to attachments array via handleFileUploaded() │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 5. Display in TaskAttachmentList (with download/remove)    │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 6. On task creation, add to task.input array               │
+│    - Each attachment becomes a TaskInput entry              │
+│    - Type: TASK_ATTACHMENT_INPUT_TYPE coding                │
+│    - Value: Reference to Media resource                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Testing Your File Upload UI
+
+Try these scenarios to verify everything works:
+
+1. **Upload valid file**: Select a PDF or image → Should upload successfully
+2. **Upload invalid type**: Select .exe file → Should show error message
+3. **Upload large file**: Select 15MB file → Should show size error
+4. **Multiple files**: Upload 2-3 files → All should appear in list
+5. **Remove file**: Click X on attachment → Should disappear from list
+6. **Download file**: Click download icon → Should download file
+7. **Create task**: Upload files and create task → Attachments saved in task.input
+
+### UI Best Practices
+
+**Accessibility:**
+- Use proper ARIA labels on action icons
+- Provide keyboard navigation support
+- Show clear error messages
+
+**User Feedback:**
+- Display upload progress
+- Show file validation errors immediately
+- Confirm successful uploads visually
+
+**Performance:**
+- Validate before upload (don't upload invalid files)
+- Show loading states during upload
+- Optimize large images before upload (future enhancement)
+
+### Summary
+
+Phase 2 complete! You now have:
+- ✅ File upload component with validation
+- ✅ Attachment list with download/remove
+- ✅ Integration with task creation form
+- ✅ FHIR-compliant storage in task.input
+
+Next, we'll integrate these attachments with email notifications so files are automatically included when task assignment emails are sent.
+
+---
 
 ## Advanced: Scheduled Notifications with Task Due Soon Reminders
 

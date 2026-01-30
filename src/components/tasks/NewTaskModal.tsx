@@ -3,7 +3,7 @@
 import { Box, Button, Divider, Grid, Modal, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { createReference, normalizeErrorString } from '@medplum/core';
-import type { CodeableConcept, Patient, Practitioner, Reference, Task } from '@medplum/fhirtypes';
+import type { CodeableConcept, Media, Patient, Practitioner, Reference, Task } from '@medplum/fhirtypes';
 import {
   CodeableConceptInput,
   CodeInput,
@@ -16,6 +16,9 @@ import {
 import { IconCircleCheck, IconCircleOff } from '@tabler/icons-react';
 import { useState } from 'react';
 import type { JSX } from 'react';
+import { TaskFileUpload } from './TaskFileUpload';
+import { TaskAttachmentList } from './TaskAttachmentList';
+import { TASK_ATTACHMENT_INPUT_TYPE } from '../../../lib/constants';
 
 export interface NewTaskModalProps {
   opened: boolean;
@@ -42,6 +45,7 @@ export function NewTaskModal(props: NewTaskModalProps): JSX.Element {
   const [performerType, setPerformerType] = useState<CodeableConcept | undefined>();
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<Media[]>([]);
 
   const handleSubmit = async (): Promise<void> => {
     if (!title.trim()) {
@@ -78,6 +82,14 @@ export function NewTaskModal(props: NewTaskModalProps): JSX.Element {
               },
             }
           : undefined,
+        // Add attachments to task.input
+        input: attachments.map((media) => ({
+          type: {
+            coding: [TASK_ATTACHMENT_INPUT_TYPE],
+            text: 'File Attachment',
+          },
+          valueReference: createReference(media),
+        })),
       };
 
       const createdTask = await medplum.createResource(newTask);
@@ -113,8 +125,17 @@ export function NewTaskModal(props: NewTaskModalProps): JSX.Element {
     setTaskCode(undefined);
     setPerformerType(undefined);
     setTaskPatient(undefined);
+    setAttachments([]);
     setIsSubmitting(false);
     onClose();
+  };
+
+  const handleFileUploaded = (media: Media): void => {
+    setAttachments((prev) => [...prev, media]);
+  };
+
+  const handleRemoveAttachment = (mediaId: string): void => {
+    setAttachments((prev) => prev.filter((m) => m.id !== mediaId));
   };
 
   return (
@@ -155,6 +176,18 @@ export function NewTaskModal(props: NewTaskModalProps): JSX.Element {
                       autosize
                       maxRows={8}
                     />
+
+                    <Box>
+                      <Text size="sm" fw={500} mb="xs">
+                        Attachments
+                      </Text>
+                      <Stack gap="sm">
+                        <TaskFileUpload onFileUploaded={handleFileUploaded} disabled={isSubmitting} />
+                        {attachments.length > 0 && (
+                          <TaskAttachmentList attachments={attachments} onRemove={handleRemoveAttachment} />
+                        )}
+                      </Stack>
+                    </Box>
                   </Stack>
                 </Box>
               </Stack>
