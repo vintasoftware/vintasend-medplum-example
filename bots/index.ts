@@ -27,4 +27,18 @@ export const BOTS: BotDescription[] = [
       },
     ],
   },
+  {
+    name: 'task-due-notification-bot',
+    needsAdminMembership: true,
+    runAsUser: true,
+    cronString: '*/5 * * * *', // Run every 5 minutes
+    timeout: 300, // 5 minutes timeout
+  },
+  {
+    name: 'send-pending-notifications-bot',
+    needsAdminMembership: true,
+    runAsUser: true,
+    cronString: '*/5 * * * *', // Run every 5 minutes
+    timeout: 300, // 5 minutes timeout
+  },
 ];

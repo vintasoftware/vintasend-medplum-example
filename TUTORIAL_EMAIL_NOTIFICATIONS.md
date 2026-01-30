@@ -784,15 +784,619 @@ Let's trace through what happens when a task is assigned:
 ✅ **FHIR-Native**: Integrates seamlessly with Medplum's FHIR data model  
 ✅ **Auditable**: All notifications are stored as FHIR resources  
 
+## Advanced: Scheduled Notifications with Task Due Soon Reminders
+
+One of VintaSend's most powerful features is the ability to schedule notifications for future delivery. Instead of sending an email immediately, you can specify a `sendAfter` date and VintaSend will automatically send the notification at the right time.
+
+In this section, we'll build a task reminder system that:
+- ✅ Periodically checks for tasks due in 24 hours
+- ✅ Schedules reminder emails to be sent exactly 24 hours before the due date
+- ✅ Fetches fresh data at send-time (not when scheduled)
+- ✅ Processes pending notifications automatically
+
+### Why Use Scheduled Notifications?
+
+**📅 Fresh Data at Send Time**
+- Context is fetched when the notification is sent, not when it's scheduled
+- If a user's name or task details change, the email will use the latest information
+- No stale data issues
+
+**⏰ Scheduled Delivery**
+- Send reminders at scheduled times (24 hours before, 1 week before, etc.)
+- Notifications sent within 5 minutes of the scheduled time (based on cron frequency)
+- No need to manually track when to send each notification
+
+**📋 Audit Trail**
+- All notifications stored as FHIR `Communication` resources
+- Track status changes (pending → sent/failed)
+- Full history of scheduled and sent notifications
+
+### Step 1: Create Task Due Soon Templates
+
+First, let's create email templates for our task reminder notifications.
+
+#### Email Body Template
+
+Create [notification-templates/emails/task-due-soon/body.html.pug](notification-templates/emails/task-due-soon/body.html.pug):
+
+```pug
+doctype html
+html
+  head
+    meta(charset='utf-8')
+    style.
+      body {
+        white-space: pre-line;
+      }
+  body
+    h1 Task Due Reminder
+
+    p Hello #{firstName},
+
+    p This is a reminder that you have a task that is due in approximately 24 hours.
+
+    p
+      strong Task:
+      |  #{taskTitle}
+    if taskDescription
+      p
+        strong Description:
+        |  #{taskDescription}
+    p
+      strong Due Date:
+      |  #{dueDate}
+    if taskIsUrgent
+      p
+        strong URGENT
+
+    p
+      a(href=taskLink) View Task
+
+    p Please make sure to complete this task before the due date.
+```
+
+#### Email Subject Template
+
+Create [notification-templates/emails/task-due-soon/subject.txt.pug](notification-templates/emails/task-due-soon/subject.txt.pug):
+
+```pug
+if taskIsUrgent
+  | [URGENT] Task due soon: #{taskTitle}
+else
+  | Reminder: Task due soon - #{taskTitle}
+```
+
+### Step 2: Add Context Generator for Task Due Soon
+
+Update [lib/notification-service.ts](lib/notification-service.ts) to include a new context generator for task due reminders:
+
+```typescript
+class TaskDueSoonContextGenerator implements ContextGenerator {
+  async generate({
+    userId,
+    taskTitle,
+    taskDescription,
+    taskIsUrgent,
+    taskLink,
+    dueDate,
+  }: {
+    userId: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }): Promise<{
+    firstName: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }> {
+    const medplum = MedplumSingleton.getInstance();
+    const user = await getUserById(medplum, userId);
+    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
+
+    return {
+      firstName,
+      taskTitle,
+      taskDescription,
+      taskIsUrgent,
+      taskLink,
+      dueDate,
+    };
+  }
+}
+```
+
+Then add it to the context map:
+
+```typescript
+export const contextGeneratorsMap = {
+  taskAssignment: new TaskAssignmentContextGenerator(),
+  taskDueSoon: new TaskDueSoonContextGenerator(),
+  // Add more context generators here for other notification types
+} as const;
+```
+
+### Step 3: Create the Task Due Soon Email Service
+
+Create [bots/services/emails/send-task-due-soon-email.ts](bots/services/emails/send-task-due-soon-email.ts):
+
+```typescript
+import { MedplumClient } from '@medplum/core';
+import { Task } from '@medplum/fhirtypes';
+import { MedplumSingleton } from '../../../lib/medplum-singleton';
+import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+
+export async function sendTaskDueSoonEmail(
+  medplum: MedplumClient, 
+  task: Task, 
+  taskLinkBaseUrl: string, 
+  sendgridConfig: SendGridConfig
+) {
+  /* sends a task due soon reminder email to a practitioner 24 hours before the task is due */
+
+  if (!task.owner?.reference) {
+    console.error('[sendTaskDueSoonEmail] Task has no owner reference');
+    throw new Error('Task must have an owner reference');
+  }
+
+  if (!task.restriction?.period?.end) {
+    console.error('[sendTaskDueSoonEmail] Task has no due date');
+    throw new Error('Task must have a due date (restriction.period.end)');
+  }
+
+  const referenceString = task.owner.reference;
+
+  // Validate format (should be "ResourceType/id")
+  if (!referenceString.includes('/')) {
+    console.error('[sendTaskDueSoonEmail] Invalid referenceString format:', referenceString);
+    throw new Error(`Invalid referenceString format: ${referenceString}`);
+  }
+
+  // Skip sending email if task is assigned to a Group
+  const [resourceType] = referenceString.split('/');
+  if (resourceType === 'Group') {
+    console.log('[sendTaskDueSoonEmail] Task assigned to Group, skipping email notification');
+    return;
+  }
+
+  MedplumSingleton.setInstance(medplum);
+  const vintasend = getNotificationService(medplum, sendgridConfig);
+
+  try {
+    const taskTitle = task.code?.text || task.description || 'Task';
+
+    if (!task.id) {
+      console.error('[sendTaskDueSoonEmail] Task has no id');
+      throw new Error('Task must have an id to send task due soon email');
+    }
+
+    const taskLink = `${taskLinkBaseUrl}/Task/${task.id}`;
+    const taskIsUrgent = task.priority === 'urgent';
+    const dueDate = new Date(task.restriction.period.end);
+    const formattedDueDate = dueDate.toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // Schedule notification to be sent 24 hours before due date
+    const sendAfter = new Date(dueDate.getTime() - 24 * 60 * 60 * 1000);
+
+    // Only schedule if sendAfter is in the future
+    if (sendAfter <= new Date()) {
+      console.log('[sendTaskDueSoonEmail] Task due date is within 24 hours or past, skipping');
+      return;
+    }
+
+    await vintasend.createNotification({
+      userId: referenceString,
+      notificationType: 'EMAIL' as const,
+      title: 'Task Due Soon Reminder',
+      contextName: 'taskDueSoon' as const,
+      contextParameters: {
+        userId: referenceString,
+        taskTitle,
+        taskDescription: task.description || '',
+        taskIsUrgent,
+        taskLink,
+        dueDate: formattedDueDate,
+      },
+      sendAfter, // 🔑 This is the key - schedule for future delivery
+      bodyTemplate: 'emails/task-due-soon/body.html.pug',
+      subjectTemplate: 'emails/task-due-soon/subject.txt.pug',
+      extraParams: {},
+    });
+
+    console.log(
+      `[sendTaskDueSoonEmail] Email scheduled for ${sendAfter.toISOString()} to: ${referenceString}`
+    );
+  } catch (error) {
+    console.error('[sendTaskDueSoonEmail] Error creating/sending notification:', error);
+    throw error;
+  }
+}
+```
+
+**Key Points:**
+- The `sendAfter` parameter tells VintaSend when to send the notification
+- We calculate it as 24 hours before the task's due date
+- The notification is stored with status `pending` until `sendAfter` time
+- Context is fetched at send-time, not when scheduled
+
+### Step 4: Create the Periodic Bot to Check for Tasks Due Soon
+
+Create [bots/handlers/task-due-soon-notification-bot.ts](bots/handlers/task-due-soon-notification-bot.ts):
+
+```typescript
+import { BotEvent, MedplumClient } from '@medplum/core';
+import { sendTaskDueSoonEmail } from '../services/emails/send-task-due-soon-email';
+
+/**
+ * Medplum Bot: Task Due Soon Notification
+ * 
+ * This bot runs periodically (every 5 minutes) to check for tasks that are
+ * due in approximately 24-25 hours and schedules email notifications to be
+ * sent 24 hours before the task due date.
+ * 
+ * The bot uses VintaSend's scheduled messages (sendAfter) to ensure
+ * notifications are sent at the appropriate time.
+ * 
+ * Cron: */5 * * * * (every 5 minutes)
+ */
+
+export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
+  console.log('[TaskDueSoonNotificationBot] Starting periodic check for tasks due in ~24 hours');
+
+  const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
+  const secrets = event.secrets;
+  const sendgridConfig = {
+    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
+    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
+    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
+  };
+
+  // Calculate the time window: 24-25 hours from now
+  // We use a 1-hour window to catch tasks that will be due soon
+  const now = new Date();
+  const windowStart = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+  const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000); // 25 hours from now
+
+  try {
+    // Search for tasks that:
+    // 1. Have an owner (assigned to someone)
+    // 2. Are not completed or cancelled
+    // 3. Have a due date (restriction.period.end) within the 24-25 hour window
+    const searchResults = await medplum.search('Task', {
+      'owner:missing': 'false',
+      'status:not': 'completed,cancelled,failed,rejected,entered-in-error',
+      // FHIR date search uses the format: ge (greater or equal) and lt (less than)
+      'restriction-date': `ge${windowStart.toISOString()}&restriction-date=lt${windowEnd.toISOString()}`,
+    });
+
+    const tasks = searchResults.entry?.map((e) => e.resource) || [];
+    
+    console.log(`[TaskDueSoonNotificationBot] Found ${tasks.length} tasks due in 24-25 hours`);
+
+    if (tasks.length === 0) {
+      return { message: 'No tasks to process', processedTasks: 0 };
+    }
+
+    // Process each task and schedule notifications
+    const results = await Promise.allSettled(
+      tasks.map(async (task) => {
+        if (!task || task.resourceType !== 'Task') {
+          return { status: 'skipped', reason: 'Invalid task resource' };
+        }
+        try {
+          await sendTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
+          return { taskId: task.id, status: 'success' };
+        } catch (error) {
+          console.error(`[TaskDueSoonNotificationBot] Error processing task ${task.id}:`, error);
+          return { taskId: task.id, status: 'error', error: String(error) };
+        }
+      })
+    );
+
+    const successful = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    console.log(
+      `[TaskDueSoonNotificationBot] Completed. Success: ${successful}, Failed: ${failed}`
+    );
+
+    return {
+      message: 'Task due soon notifications processed',
+      processedTasks: tasks.length,
+      successful,
+      failed,
+    };
+  } catch (error) {
+    console.error('[TaskDueSoonNotificationBot] Error during execution:', error);
+    throw error;
+  }
+}
+```
+
+**Understanding the Time Window:**
+- We check for tasks due in 24-25 hours (a 1-hour window)
+- This prevents duplicate notifications if the bot runs multiple times
+- Tasks are found only once, when they first enter this window
+
+### Step 5: Create the Send Pending Notifications Bot
+
+VintaSend stores scheduled notifications with a `pending` status. We need a periodic bot to actually send them when their `sendAfter` time arrives.
+
+Create [bots/handlers/send-pending-notifications-bot.ts](bots/handlers/send-pending-notifications-bot.ts):
+
+```typescript
+import { BotEvent, MedplumClient } from '@medplum/core';
+import { MedplumSingleton } from '../../lib/medplum-singleton';
+import { getNotificationService } from '../../lib/notification-service';
+
+/**
+ * Medplum Bot: Send Pending Notifications
+ * 
+ * This bot runs periodically (every 5 minutes) to process and send
+ * all pending scheduled notifications that are due to be sent.
+ * 
+ * It uses VintaSend's notification service to check for notifications
+ * where sendAfter <= current time and triggers their delivery.
+ * 
+ * Cron: */5 * * * * (every 5 minutes)
+ */
+
+export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
+  console.log('[SendPendingNotificationsBot] Starting to process pending notifications');
+  
+  const secrets = event.secrets;
+  const sendgridConfig = {
+    SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
+    SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
+    SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
+  };
+
+  try {
+    MedplumSingleton.setInstance(medplum);
+    const vintasend = getNotificationService(medplum, sendgridConfig);
+
+    // Send all pending notifications that are ready to be sent
+    const result = await vintasend.sendPendingNotifications();
+
+    console.log('[SendPendingNotificationsBot] Completed processing pending notifications');
+    console.log('[SendPendingNotificationsBot] Result:', JSON.stringify(result, null, 2));
+
+    return {
+      message: 'Pending notifications processed',
+      result,
+    };
+  } catch (error) {
+    console.error('[SendPendingNotificationsBot] Error processing pending notifications:', error);
+    throw error;
+  }
+}
+```
+
+This bot:
+- Runs every 5 minutes via cron schedule
+- Calls `vintasend.sendPendingNotifications()` which:
+  - Queries for all `Communication` resources with status `pending` and `sendAfter <= now`
+  - Fetches fresh context data using the context generators
+  - Renders templates with current data
+  - Sends emails via SendGrid
+  - Updates notification status to `sent` or `failed`
+
+### Step 6: Configure Both Bots in the Deployment
+
+Update [bots/index.ts](bots/index.ts) to include both new bots:
+
+```typescript
+export const BOTS: BotDescription[] = [
+  {
+    name: 'send-task-assignment-email',
+    needsAdminMembership: true,
+    runAsUser: true,
+    criteria: 'Task?owner:missing=false',
+    extension: [
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'create',
+      },
+      {
+        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
+        valueCode: 'update',
+      },
+    ],
+  },
+  {
+    name: 'task-due-soon-notification-bot',
+    needsAdminMembership: true,
+    runAsUser: true,
+    cronString: '*/5 * * * *', // Run every 5 minutes
+    timeout: 300, // 5 minutes timeout
+  },
+  {
+    name: 'send-pending-notifications-bot',
+    needsAdminMembership: true,
+    runAsUser: true,
+    cronString: '*/5 * * * *', // Run every 5 minutes
+    timeout: 300, // 5 minutes timeout
+  },
+];
+```
+
+### Step 7: Build and Deploy
+
+Build and deploy your bots:
+
+```bash
+# Compile templates and build bots
+npm run bots:build
+
+# Deploy to Medplum
+npm run bots:deploy
+```
+
+### How the Scheduled Notification Flow Works
+
+Here's the complete lifecycle of a scheduled task reminder:
+
+1. **Task Created with Due Date**
+   - A Task is created with `restriction.period.end` set to a future date
+   - Task is assigned to a practitioner via `owner` reference
+
+2. **Periodic Check (Every 5 Minutes)**
+   - `task-due-soon-notification-bot` runs via cron
+   - Searches for tasks with due dates in the 24-25 hour window
+   - For each matching task, calls `sendTaskDueSoonEmail()`
+
+3. **Notification Scheduled**
+   - `sendTaskDueSoonEmail()` calls `vintasend.createNotification()`
+   - VintaSend creates a FHIR `Communication` resource with:
+     - Status: `pending`
+     - `sendAfter`: Set to 24 hours before task due date
+     - Context parameters stored in the Communication resource
+
+4. **Waiting Period**
+   - Notification sits in the database with `pending` status
+   - Task details, user data, etc. can change during this time
+
+5. **Send Time Arrives**
+   - `send-pending-notifications-bot` runs every 5 minutes
+   - Calls `vintasend.sendPendingNotifications()`
+   - VintaSend finds all notifications where `sendAfter <= now` and status is `pending`
+
+6. **Context Generation (Fresh Data!)**
+   - For each pending notification, VintaSend calls the context generator
+   - `TaskDueSoonContextGenerator.generate()` fetches current user data
+   - If the user's name changed since scheduling, the new name is used
+   - This ensures all data in the email is current
+
+7. **Template Rendering**
+   - Pug templates are rendered with fresh context
+   - Email HTML and subject are generated
+
+8. **Email Sent**
+   - SendGrid adapter sends the email
+   - `Communication` resource status updated to `sent`
+   - Timestamp recorded in `sent` field
+
+9. **Error Handling**
+   - If sending fails, status is set to `failed`
+   - Error details stored in the Communication resource
+   - Failed notifications remain in the database for manual review or retry
+
+### Benefits of This Approach
+
+✅ **Always Current Data**: Context fetched at send-time, not schedule-time  
+✅ **Scheduled Delivery**: Emails sent within 5 minutes of scheduled time (based on cron frequency)  
+✅ **Audit Trail**: Every notification stored as a FHIR `Communication` resource  
+✅ **Status Tracking**: Monitor pending, sent, and failed notifications  
+✅ **Scalable**: Works with any number of scheduled notifications  
+✅ **Flexible**: Easy to add more notification types (appointment reminders, etc.)  
+
+### Testing Scheduled Notifications
+
+To test the scheduled notification system:
+
+1. **Create a Task with a Due Date**:
+```typescript
+const tomorrow = new Date();
+tomorrow.setDate(tomorrow.getDate() + 1);
+tomorrow.setHours(14, 0, 0, 0); // 2 PM tomorrow
+
+const task = await medplum.createResource({
+  resourceType: 'Task',
+  status: 'requested',
+  intent: 'order',
+  priority: 'routine',
+  code: { text: 'Review lab results' },
+  description: 'Review and approve patient lab results',
+  owner: { reference: 'Practitioner/123' },
+  restriction: {
+    period: {
+      end: tomorrow.toISOString(),
+    },
+  },
+});
+```
+
+2. **Wait for the Periodic Bot to Run**:
+   - Within 5 minutes, the `task-due-soon-notification-bot` should pick up the task
+   - Check bot logs to confirm notification was scheduled
+
+3. **Check the Communication Resource**:
+```typescript
+const communications = await medplum.search('Communication', {
+  'status': 'pending',
+  'subject': `Task/${task.id}`,
+});
+// Should show a pending notification with sendAfter timestamp
+```
+
+4. **Wait for Send Time**:
+   - The `send-pending-notifications-bot` will send it when `sendAfter` time arrives
+   - Check the practitioner's email inbox
+   - Communication status should change to `sent`
+
+### Customizing Send Times
+
+You can easily adjust when reminders are sent:
+
+```typescript
+// Send 1 week before
+const sendAfter = new Date(dueDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+// Send 2 hours before
+const sendAfter = new Date(dueDate.getTime() - 2 * 60 * 60 * 1000);
+
+// Send at a specific time on a specific date
+const sendAfter = new Date('2026-02-15T10:00:00Z');
+```
+
+### Multiple Reminders for One Task
+
+You can schedule multiple reminders for the same task:
+
+```typescript
+// Send 1 week before
+await vintasend.createNotification({
+  // ... notification config
+  sendAfter: new Date(dueDate.getTime() - 7 * 24 * 60 * 60 * 1000),
+  title: 'Task Due in 1 Week',
+});
+
+// Send 1 day before
+await vintasend.createNotification({
+  // ... notification config
+  sendAfter: new Date(dueDate.getTime() - 24 * 60 * 60 * 1000),
+  title: 'Task Due Tomorrow',
+});
+
+// Send on due date
+await vintasend.createNotification({
+  // ... notification config
+  sendAfter: dueDate,
+  title: 'Task Due Today',
+});
+```
+
 ## Next Steps
 
-Now that you have task assignment emails working, you can:
+Now that you have both immediate and scheduled email notifications working, you can:
 
 1. **Add More Notification Types**: Create context generators for appointment reminders, lab results, etc.
 2. **Add SMS Support**: VintaSend supports multiple channels
 3. **Customize Templates**: Add branding, better styling, or more dynamic content
 4. **Add Preferences**: Let users opt-in/out of certain notifications
-5. **Add Scheduling**: Use `sendAfter` to schedule reminder emails
+5. **Add Multiple Reminders**: Send notifications at different intervals (1 week, 1 day, 1 hour before)
+6. **Add Escalation**: Send reminders to supervisors if tasks remain incomplete
 
 ## Troubleshooting
 

@@ -15,7 +15,7 @@ import { sendTaskAssignmentEmail } from '../services/emails/send-task-assignment
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
   const secrets = event.secrets;
-  const sendGridVariables = {
+  const sendgridConfig = {
     SENDGRID_API_KEY: secrets.SENDGRID_API_KEY.valueString || '',
     SENDGRID_FROM_EMAIL: secrets.SENDGRID_FROM_EMAIL.valueString || '',
     SENDGRID_FROM_NAME: secrets.SENDGRID_FROM_NAME.valueString || 'Medplum Notifications',
@@ -29,7 +29,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
 
     try {
-      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendgridConfig);
       console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);
     } catch (error) {
       console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);

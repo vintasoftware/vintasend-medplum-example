@@ -1,14 +1,14 @@
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
-import { getNotificationService, SendGridVariables } from '../../../lib/notification-service';
+import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
 import { formatPatientNameWithPreferredName } from '../../../lib/patients';
 
 export async function sendTaskAssignmentEmail(
   medplum: MedplumClient,
   task: Task,
   taskLinkBaseUrl: string,
-  sendGridVariables: SendGridVariables
+  sendgridConfig: SendGridConfig
 ) {
   /* sends a task assignment email to a practitioner */
 
@@ -36,7 +36,7 @@ export async function sendTaskAssignmentEmail(
   }
 
   MedplumSingleton.setInstance(medplum);
-  const vintasend = getNotificationService(medplum, sendGridVariables);
+  const vintasend = getNotificationService(medplum, sendgridConfig);
 
   try {
     const taskTitle = task.code?.text || task.description || 'New Task';

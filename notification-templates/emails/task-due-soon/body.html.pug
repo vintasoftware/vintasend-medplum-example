@@ -1,0 +1,34 @@
+doctype html
+html
+  head
+    meta(charset='utf-8')
+    style.
+      body {
+        white-space: pre-line;
+      }
+  body
+    h1 Task Due Reminder
+
+    p Hello #{firstName},
+
+    p This is a reminder that you have a task that is due in approximately 24 hours.
+
+    p
+      strong Task:
+      |  #{taskTitle}
+    if taskDescription
+      p
+        strong Description:
+        |  #{taskDescription}
+    p
+      strong Due Date:
+      |  #{dueDate}
+    if taskIsUrgent
+      p
+        strong URGENT
+
+    p
+      a(href=taskLink) View Task
+
+    p Please make sure to complete this task before the due date.
+

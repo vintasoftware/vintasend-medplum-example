@@ -68,6 +68,44 @@ class TaskAssignmentContextGenerator implements ContextGenerator {
   }
 }
 
+class TaskDueSoonContextGenerator implements ContextGenerator {
+  async generate({
+    userId,
+    taskTitle,
+    taskDescription,
+    taskIsUrgent,
+    taskLink,
+    dueDate,
+  }: {
+    userId: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }): Promise<{
+    firstName: string;
+    taskTitle: string;
+    taskDescription: string;
+    taskIsUrgent: boolean;
+    taskLink: string;
+    dueDate: string;
+  }> {
+    const medplum = MedplumSingleton.getInstance();
+    const user = await getUserById(medplum, userId);
+    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
+
+    return {
+      firstName,
+      taskTitle,
+      taskDescription,
+      taskIsUrgent,
+      taskLink,
+      dueDate,
+    };
+  }
+}
+
 class InboxMessageContextGenerator implements ContextGenerator {
   async generate({
     userId,
@@ -118,6 +156,7 @@ class InboxMessageContextGenerator implements ContextGenerator {
 // context map for generating the context of each notification
 export const contextGeneratorsMap = {
   taskAssignment: new TaskAssignmentContextGenerator(),
+  taskDueSoon: new TaskDueSoonContextGenerator(),
   inboxMessage: new InboxMessageContextGenerator(),
 } as const;
 
@@ -127,21 +166,21 @@ export type NotificationTypeConfig = {
   UserIdType: string;
 };
 
-export type SendGridVariables = {
+export type SendGridConfig = {
   SENDGRID_API_KEY: string;
   SENDGRID_FROM_EMAIL: string;
   SENDGRID_FROM_NAME: string;
 };
 
-export function getNotificationService(medplum: MedplumClient, variables: SendGridVariables) {
+export function getNotificationService(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
     compiledTemplates
   );
   const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
-    apiKey: variables.SENDGRID_API_KEY || '',
-    fromEmail: variables.SENDGRID_FROM_EMAIL || '',
-    fromName: variables.SENDGRID_FROM_NAME,
+    apiKey: sendgridConfig.SENDGRID_API_KEY || '',
+    fromEmail: sendgridConfig.SENDGRID_FROM_EMAIL || '',
+    fromName: sendgridConfig.SENDGRID_FROM_NAME,
   });
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
