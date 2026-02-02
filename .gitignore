@@ -25,3 +25,6 @@ package-lock.json
 *.sw?
 .env
 .env.local
+
+# Ignore compiled notification templates
+compiled-notification-templates.json
