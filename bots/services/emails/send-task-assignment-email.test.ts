@@ -103,9 +103,8 @@ describe('sendTaskAssignmentEmail with Attachments', () => {
     expect(callArgs.contextParameters.attachmentCount).toBe(1);
     expect(callArgs.attachments).toBeDefined();
     expect(callArgs.attachments.length).toBe(1);
-    expect(callArgs.attachments[0].filename).toBe('test-document.pdf');
-    expect(callArgs.attachments[0].contentType).toBe('application/pdf');
-    expect(callArgs.attachments[0].file).toBeInstanceOf(Buffer);
+    expect(callArgs.attachments[0].fileId).toBe(media.id);
+    expect(callArgs.attachments[0].description).toBe('test-document.pdf');
   });
 
   it('should send email with multiple attachments', async () => {
@@ -198,8 +197,10 @@ describe('sendTaskAssignmentEmail with Attachments', () => {
     expect(callArgs.contextParameters.attachmentCount).toBe(2);
     expect(callArgs.attachments).toBeDefined();
     expect(callArgs.attachments.length).toBe(2);
-    expect(callArgs.attachments[0].filename).toBe('document.pdf');
-    expect(callArgs.attachments[1].filename).toBe('image.jpg');
+    expect(callArgs.attachments[0].fileId).toBe(media1.id);
+    expect(callArgs.attachments[0].description).toBe('document.pdf');
+    expect(callArgs.attachments[1].fileId).toBe(media2.id);
+    expect(callArgs.attachments[1].description).toBe('image.jpg');
   });
 
   it('should send email without attachments for task with no files', async () => {
@@ -283,12 +284,14 @@ describe('sendTaskAssignmentEmail with Attachments', () => {
 
     await sendTaskAssignmentEmail(medplum, task, taskLinkBaseUrl, sendgridConfig);
 
-    // Email should still be sent, just without the failed attachment
+    // Email should still be sent with the attachment reference
+    // The actual file retrieval happens later when VintaSend processes the notification
     expect(mockCreateNotification).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateNotification.mock.calls[0][0];
 
-    expect(callArgs.contextParameters.attachmentCount).toBe(0);
-    expect(callArgs.attachments.length).toBe(0);
+    expect(callArgs.contextParameters.attachmentCount).toBe(1);
+    expect(callArgs.attachments.length).toBe(1);
+    expect(callArgs.attachments[0].fileId).toBe(media.id);
 
     consoleErrorSpy.mockRestore();
   });

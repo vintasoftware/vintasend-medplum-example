@@ -180,14 +180,41 @@ export async function getBinaryFromMedia(
   }
 
   try {
-    // Parse Binary reference (e.g., "Binary/123")
-    const [resourceType, id] = binaryUrl.split('/');
-    if (resourceType !== 'Binary' || !id) {
-      console.error(`[getBinaryFromMedia] Invalid Binary reference: ${binaryUrl}`);
-      return null;
-    }
+    // Handle signed URLs (external storage) vs FHIR references
+    if (binaryUrl.startsWith('http://') || binaryUrl.startsWith('https://')) {
+      // For signed URLs, fetch content directly from the URL
+      const response = await fetch(binaryUrl);
+      if (!response.ok) {
+        console.error(`[getBinaryFromMedia] Failed to fetch from signed URL: ${response.status} ${response.statusText}`);
+        return null;
+      }
 
-    return await medplum.readResource('Binary', id);
+      // Convert response to base64-encoded data
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64Data = buffer.toString('base64');
+
+      // Extract Binary ID from URL for the resource ID
+      const urlParts = binaryUrl.split('?')[0].split('/');
+      const binaryId = urlParts[urlParts.length - 1];
+
+      // Return a Binary-like object with the fetched data
+      return {
+        resourceType: 'Binary',
+        id: binaryId,
+        contentType: media.content?.contentType || 'application/octet-stream',
+        data: base64Data,
+      } as Binary;
+    } else {
+      // Parse FHIR reference (e.g., "Binary/123")
+      const [resourceType, id] = binaryUrl.split('/');
+      if (resourceType !== 'Binary' || !id) {
+        console.error(`[getBinaryFromMedia] Invalid Binary reference: ${binaryUrl}`);
+        return null;
+      }
+
+      return await medplum.readResource('Binary', id);
+    }
   } catch (error) {
     console.error(`[getBinaryFromMedia] Failed to fetch Binary resource: ${binaryUrl}`, error);
     return null;

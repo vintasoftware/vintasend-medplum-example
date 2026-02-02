@@ -1,7 +1,7 @@
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { MedplumSingleton } from '../../../lib/medplum-singleton';
-import { getNotificationService, SendGridConfig, convertMediaToAttachment } from '../../../lib/notification-service';
+import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
 import { formatPatientNameWithPreferredName } from '../../../lib/patients';
 import { getTaskAttachments } from '../../../lib/file-upload';
 
@@ -70,17 +70,17 @@ export async function sendTaskAssignmentEmail(
     // eslint-disable-next-line no-console
     console.log(`[sendTaskAssignmentEmail] Found ${taskAttachments.length} attachments for task ${task.id}`);
 
-    // Convert to VintaSend attachment format
-    const attachmentPromises = taskAttachments.map((media) => convertMediaToAttachment(medplum, media));
-    const attachmentResults = await Promise.all(attachmentPromises);
-    
-    // Filter out null values (failed conversions)
-    const attachments = attachmentResults.filter((attachment): attachment is NonNullable<typeof attachment> => 
-      attachment !== null
-    );
+    // Convert Media resources to VintaSend attachment references
+    // Use fileId to reference existing Media resources instead of re-uploading
+    const attachments = taskAttachments
+      .filter((media) => media.id) // Only include media with IDs
+      .map((media) => ({
+        fileId: media.id as string,
+        description: media.content?.title,
+      }));
 
     // eslint-disable-next-line no-console
-    console.log(`[sendTaskAssignmentEmail] Successfully converted ${attachments.length} attachments`);
+    console.log(`[sendTaskAssignmentEmail] Prepared ${attachments.length} attachment references`);
 
     await vintasend.createNotification({
       userId: referenceString,
