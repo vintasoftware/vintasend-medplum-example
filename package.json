@@ -70,6 +70,6 @@
   "dependencies": {
     "vintasend": "^0.4.3",
     "vintasend-medplum": "^0.4.5",
-    "vintasend-sendgrid": "^0.4.3"
+    "vintasend-sendgrid": "^0.4.4"
   }
 }
