@@ -8,16 +8,16 @@ export interface FileUploadResult {
 
 /**
  * Uploads a file to Medplum and creates both Binary and Media resources.
- * 
+ *
  * The Binary resource stores the actual file content, while the Media resource
  * provides metadata and a reference to the Binary resource.
- * 
+ *
  * @param medplum - The Medplum client instance
  * @param file - The file to upload (File from browser or Buffer from Node.js)
  * @param filename - The name of the file
  * @param contentType - The MIME type of the file (e.g., 'application/pdf', 'image/jpeg')
  * @returns An object containing both the Binary and Media resources
- * 
+ *
  * @example
  * const result = await uploadFileToMedplum(
  *   medplum,
@@ -36,6 +36,7 @@ export async function uploadFileToMedplum(
   const binary = await medplum.createBinary(file, filename, contentType);
 
   // Create Media resource as metadata wrapper
+  // Include the binaryId in identifiers so VintaSend can properly reconstruct the attachment
   const media = await medplum.createResource<Media>({
     resourceType: 'Media',
     status: 'completed',
@@ -44,6 +45,12 @@ export async function uploadFileToMedplum(
       url: `Binary/${binary.id}`,
       title: filename,
     },
+    identifier: [
+      {
+        system: 'http://vintasend.com/fhir/binary-id',
+        value: binary.id,
+      },
+    ],
   });
 
   return { binary, media };
@@ -51,15 +58,15 @@ export async function uploadFileToMedplum(
 
 /**
  * Attaches a Media resource to a Task by adding it to the task's input array.
- * 
+ *
  * This function follows the FHIR Task resource specification, where attachments
  * are stored in the task.input array with a specific type code.
- * 
+ *
  * @param medplum - The Medplum client instance
  * @param task - The Task resource to attach the file to
  * @param mediaReference - A reference to the Media resource (e.g., { reference: 'Media/123' })
  * @returns The updated Task resource with the attachment added
- * 
+ *
  * @example
  * const updatedTask = await attachFileToTask(
  *   medplum,
@@ -100,14 +107,14 @@ export async function attachFileToTask(
 
 /**
  * Retrieves all Media resources attached to a Task.
- * 
+ *
  * This function filters the task's input array for entries with the 'attachment' type
  * and fetches the corresponding Media resources.
- * 
+ *
  * @param medplum - The Medplum client instance
  * @param task - The Task resource to get attachments from
  * @returns An array of Media resources attached to the task
- * 
+ *
  * @example
  * const attachments = await getTaskAttachments(medplum, task);
  * console.log(`Task has ${attachments.length} attachments`);
@@ -157,14 +164,14 @@ export async function getTaskAttachments(
 
 /**
  * Gets the Binary content from a Media resource.
- * 
+ *
  * This utility function extracts the file data from the Binary resource
  * referenced by a Media resource.
- * 
+ *
  * @param medplum - The Medplum client instance
  * @param media - The Media resource containing the reference to the Binary
  * @returns The Binary resource with file content
- * 
+ *
  * @example
  * const binary = await getBinaryFromMedia(medplum, media);
  * console.log(`File size: ${binary.data?.length} bytes`);
