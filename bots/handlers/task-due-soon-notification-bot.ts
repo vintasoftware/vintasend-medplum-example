@@ -6,14 +6,14 @@ import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers'
 
 /**
  * Medplum Bot: Task Due Soon Notification
- * 
+ *
  * This bot triggers on Task creation/update and schedules email notifications
  * to be sent 24 hours before the task due date.
- * 
+ *
  * The bot uses VintaSend's scheduled messages (sendAfter) to ensure
  * notifications are sent at the appropriate time. The actual sending is
  * handled by the send-pending-notifications-bot.
- * 
+ *
  * Subscription: Task (create/update)
  */
 
@@ -56,10 +56,10 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       break;
   }
 
-  const appBaseUrl = process.env.APP_BASE_URL;
+  const appBaseUrl = event.secrets.PROVIDER_APP_BASE_URL?.valueString;
   if (!appBaseUrl) {
-    console.error('[TaskDueSoonNotificationBot] APP_BASE_URL environment variable is not set');
-    throw new Error('APP_BASE_URL must be configured');
+    console.error('[TaskDueSoonNotificationBot] PROVIDER_APP_BASE_URL secret is not set');
+    throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
   }
 
   const sendgridConfig = buildSendGridConfig(event);

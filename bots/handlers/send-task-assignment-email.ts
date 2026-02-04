@@ -22,7 +22,11 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 
   // Only send email if task has an owner
   if (task.owner?.reference) {
-    const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
+    const appBaseUrl = event.secrets.PROVIDER_APP_BASE_URL?.valueString;
+    if (!appBaseUrl) {
+      console.error('[TaskAssignmentBot] PROVIDER_APP_BASE_URL secret is not set');
+      throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
+    }
 
     try {
       await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);

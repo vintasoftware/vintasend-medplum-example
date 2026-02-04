@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In this tutorial, we'll walk through implementing an email notification system for task assignments in a Medplum healthcare application. When a practitioner is assigned a task, they'll automatically receive an email with all the relevant details. 
+In this tutorial, we'll walk through implementing an email notification system for task assignments in a Medplum healthcare application. When a practitioner is assigned a task, they'll automatically receive an email with all the relevant details.
 
 We'll be using [VintaSend](https://github.com/vintasoftware/vintasend), a powerful notification framework, along with [VintaSend-Medplum](https://github.com/vintasoftware/vintasend-medplum), which provides Medplum-specific adapters for the VintaSend framework.
 
@@ -261,11 +261,11 @@ import { VintaSendFactory } from 'vintasend';
 import { MedplumSingleton } from './medplum-singleton';
 import { formatPatientNameWithPreferredName } from './patients';
 import * as compiledTemplates from '../compiled-notification-templates.json';
-import { 
-  MedplumNotificationBackend, 
-  MedplumAttachmentManager, 
-  PugInlineEmailTemplateRendererFactory, 
-  MedplumLogger 
+import {
+  MedplumNotificationBackend,
+  MedplumAttachmentManager,
+  PugInlineEmailTemplateRendererFactory,
+  MedplumLogger
 } from 'vintasend-medplum';
 import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
 
@@ -349,7 +349,7 @@ export function getNotificationService(medplum: MedplumClient) {
         fromName: process.env.SENDGRID_FROM_NAME,
       }
     );
-    
+
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
     backend,
@@ -552,7 +552,7 @@ npm run bots:build
 
 This will:
 1. Compile the Pug templates to JSON
-2. Compile TypeScript to JavaScript  
+2. Compile TypeScript to JavaScript
 3. Bundle everything with esbuild
 
 ### Deploy to Medplum:
@@ -591,7 +591,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 
   // Only send email if task has an owner
   if (task.owner?.reference) {
-    const appBaseUrl = process.env.APP_BASE_URL || 'https://your-app-url.com';
+    const appBaseUrl = process.env.PROVIDER_APP_BASE_URL || 'https://your-app-url.com';
 
     try {
       await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
@@ -630,7 +630,7 @@ SENDGRID_FROM_EMAIL=noreply@yourdomain.com
 SENDGRID_FROM_NAME=Your App Name
 
 # Application Configuration
-APP_BASE_URL=https://your-app-url.com
+PROVIDER_APP_BASE_URL=https://your-app-url.com
 ```
 
 Copy this to `.env` and fill in your actual values:
@@ -726,8 +726,8 @@ import { sendTaskAssignmentEmail } from './bots/services/emails/send-task-assign
 // Direct usage (if not using subscription)
 export async function manualTaskAssignment(medplum: MedplumClient, task: Task) {
   await sendTaskAssignmentEmail(
-    medplum, 
-    task, 
+    medplum,
+    task,
     'https://your-app-url.com'
   );
 }
@@ -777,7 +777,7 @@ Let's trace through what happens when a task is assigned:
 3. **Bot Triggered**: If criteria matches, the bot is invoked with the Task resource
 4. **Service Called**: The bot handler calls `sendTaskAssignmentEmail()`
 5. **Validation**: The service validates the task has an owner and isn't assigned to a Group
-6. **Data Enrichment**: 
+6. **Data Enrichment**:
    - Fetches the requester's name
    - Builds the task link
    - Determines if the task is urgent
@@ -795,12 +795,12 @@ Let's trace through what happens when a task is assigned:
 
 ## Benefits of This Approach
 
-✅ **Type-Safe**: TypeScript ensures your context parameters match your templates  
-✅ **Testable**: Each component can be tested in isolation  
-✅ **Maintainable**: Templates are separate from logic  
-✅ **Extensible**: Easy to add new notification types  
-✅ **FHIR-Native**: Integrates seamlessly with Medplum's FHIR data model  
-✅ **Auditable**: All notifications are stored as FHIR resources  
+✅ **Type-Safe**: TypeScript ensures your context parameters match your templates
+✅ **Testable**: Each component can be tested in isolation
+✅ **Maintainable**: Templates are separate from logic
+✅ **Extensible**: Easy to add new notification types
+✅ **FHIR-Native**: Integrates seamlessly with Medplum's FHIR data model
+✅ **Auditable**: All notifications are stored as FHIR resources
 
 ## Advanced: File Attachments for Task Notifications
 
@@ -1271,10 +1271,10 @@ export interface TaskAttachmentListProps {
   readOnly?: boolean;
 }
 
-export function TaskAttachmentList({ 
-  attachments, 
-  onRemove, 
-  readOnly = false 
+export function TaskAttachmentList({
+  attachments,
+  onRemove,
+  readOnly = false
 }: TaskAttachmentListProps): JSX.Element {
   const medplum = useMedplum();
 
@@ -1301,7 +1301,7 @@ export function TaskAttachmentList({
     try {
       const binaryId = media.content.url.split('/')[1];
       const url = `${medplum.getBaseUrl()}fhir/R4/Binary/${binaryId}`;
-      
+
       const link = document.createElement('a');
       link.href = url;
       link.download = media.content.title || 'download';
@@ -1530,14 +1530,14 @@ Then add the `convertMediaToAttachment` function after the `getUserById` functio
 ```typescript
 /**
  * Converts a Media resource to VintaSend attachment format.
- * 
+ *
  * Fetches the Binary resource referenced by the Media and extracts the file data,
  * then returns it in the format expected by VintaSend for email attachments.
- * 
+ *
  * @param medplum - The Medplum client instance
  * @param media - The Media resource containing the file metadata
  * @returns A NotificationAttachmentUpload object with file, filename, and contentType
- * 
+ *
  * @example
  * const attachment = await convertMediaToAttachment(medplum, media);
  * // { file: Buffer, filename: 'document.pdf', contentType: 'application/pdf' }
@@ -1553,7 +1553,7 @@ export async function convertMediaToAttachment(
   try {
     // Fetch Binary resource from media.content.url
     const binary = await getBinaryFromMedia(medplum, media);
-    
+
     if (!binary) {
       console.error('[convertMediaToAttachment] Failed to fetch Binary resource for Media:', media.id);
       return null;
@@ -1665,7 +1665,7 @@ const attachmentPromises = taskAttachments.map((media) => convertMediaToAttachme
 const attachmentResults = await Promise.all(attachmentPromises);
 
 // Filter out null values (failed conversions)
-const attachments = attachmentResults.filter((attachment): attachment is NonNullable<typeof attachment> => 
+const attachments = attachmentResults.filter((attachment): attachment is NonNullable<typeof attachment> =>
   attachment !== null
 );
 
@@ -1730,13 +1730,13 @@ html
       p
         strong Description:
         |  #{taskDescription}
-    
+
     if attachmentCount > 0
       p
         strong Attachments:
         |  #{attachmentCount} file(s) attached
       p Files are attached to this email for your reference.
-    
+
     if taskIsUrgent
       p
         strong URGENT
@@ -2163,14 +2163,14 @@ import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers'
 
 /**
  * Medplum Bot: Task Due Soon Notification
- * 
+ *
  * This bot triggers on Task creation/update and schedules email notifications
  * to be sent 24 hours before the task due date.
- * 
+ *
  * The bot uses VintaSend's scheduled messages (sendAfter) to ensure
  * notifications are sent at the appropriate time. The actual sending is
  * handled by the send-pending-notifications-bot.
- * 
+ *
  * Subscription: Task (create/update)
  */
 
@@ -2213,10 +2213,10 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       break;
   }
 
-  const appBaseUrl = process.env.APP_BASE_URL;
+  const appBaseUrl = process.env.PROVIDER_APP_BASE_URL;
   if (!appBaseUrl) {
-    console.error('[TaskDueSoonNotificationBot] APP_BASE_URL environment variable is not set');
-    throw new Error('APP_BASE_URL must be configured');
+    console.error('[TaskDueSoonNotificationBot] PROVIDER_APP_BASE_URL environment variable is not set');
+    throw new Error('PROVIDER_APP_BASE_URL must be configured');
   }
 
   const sendgridConfig = buildSendGridConfig(event);
@@ -2279,7 +2279,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 - **Uses Helper Function**: Uses `getTaskDueSoonSchedulingReason` to consolidate validation logic
 - **Structured Validation**: All validation checks return specific error kinds via discriminated union
 - **Invalid Date Handling**: Detects and skips tasks with invalid due dates
-- **Required Configuration**: Throws if `APP_BASE_URL` is not configured (fails fast)
+- **Required Configuration**: Throws if `PROVIDER_APP_BASE_URL` is not configured (fails fast)
 - **Scheduling**: Uses `sendAfter` to schedule the notification for 24 hours before due date
 
 ### Step 5: Create the Send Pending Notifications Bot
@@ -2295,19 +2295,19 @@ import { getNotificationService, buildSendGridConfig } from '../../lib/notificat
 
 /**
  * Medplum Bot: Send Pending Notifications
- * 
+ *
  * This bot runs periodically (every 5 minutes) to process and send
  * all pending scheduled notifications that are due to be sent.
- * 
+ *
  * It uses VintaSend's notification service to check for notifications
  * where sendAfter <= current time and triggers their delivery.
- * 
+ *
  * Cron: */5 * * * * (every 5 minutes)
  */
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   console.log('[SendPendingNotificationsBot] Starting to process pending notifications');
-  
+
   const sendgridConfig = buildSendGridConfig(event);
 
   try {
@@ -2457,15 +2457,15 @@ Here's the complete lifecycle of a scheduled task reminder:
 
 ### Benefits of This Approach
 
-✅ **Always Current Data**: Context fetched at send-time, not schedule-time  
-✅ **Event-Driven**: Notifications scheduled immediately when tasks are created/updated  
-✅ **Efficient**: Only processes relevant tasks via subscription criteria, no unnecessary searches  
-✅ **Scheduled Delivery**: Emails sent within 5 minutes of scheduled time (based on cron frequency)  
-✅ **Audit Trail**: Every notification stored as a FHIR `Communication` resource  
-✅ **Status Tracking**: Monitor pending, sent, and failed notifications  
-✅ **Scalable**: Works with any number of scheduled notifications  
-✅ **Flexible**: Easy to add more notification types (appointment reminders, etc.)  
-✅ **No Duplicate Notifications**: Each task triggers the bot once per create/update event  
+✅ **Always Current Data**: Context fetched at send-time, not schedule-time
+✅ **Event-Driven**: Notifications scheduled immediately when tasks are created/updated
+✅ **Efficient**: Only processes relevant tasks via subscription criteria, no unnecessary searches
+✅ **Scheduled Delivery**: Emails sent within 5 minutes of scheduled time (based on cron frequency)
+✅ **Audit Trail**: Every notification stored as a FHIR `Communication` resource
+✅ **Status Tracking**: Monitor pending, sent, and failed notifications
+✅ **Scalable**: Works with any number of scheduled notifications
+✅ **Flexible**: Easy to add more notification types (appointment reminders, etc.)
+✅ **No Duplicate Notifications**: Each task triggers the bot once per create/update event
 
 ### Testing Scheduled Notifications
 

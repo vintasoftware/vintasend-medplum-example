@@ -21,7 +21,7 @@ Create a `.env` file with your Medplum credentials:
 MEDPLUM_BASE_URL=https://api.medplum.com
 MEDPLUM_CLIENT_ID=your-client-id
 MEDPLUM_CLIENT_SECRET=your-client-secret
-APP_BASE_URL=https://your-app-url.com
+PROVIDER_APP_BASE_URL=https://your-app-url.com
 ```
 
 ### Usage:

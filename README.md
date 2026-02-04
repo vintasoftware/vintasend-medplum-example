@@ -82,7 +82,7 @@ SENDGRID_FROM_EMAIL=noreply@yourdomain.com
 SENDGRID_FROM_NAME=Your App Name
 
 # Application Configuration
-APP_BASE_URL=https://your-app-url.com
+PROVIDER_APP_BASE_URL=https://your-app-url.com
 ```
 
 > **Note**: Copy `.env.example` to `.env` and fill in your actual values. Never commit `.env` to version control.
