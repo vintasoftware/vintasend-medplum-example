@@ -1,6 +1,6 @@
 {
-  "name": "medplum-provider",
-  "version": "5.0.10",
+  "name": "vintasend-medplum-example",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -68,8 +68,8 @@
     "node": "^22.18.0 || >=24.2.0"
   },
   "dependencies": {
-    "vintasend": "^0.5.0-alpha2",
-    "vintasend-medplum": "^0.5.0-alpha2",
-    "vintasend-sendgrid": "^0.5.0-alpha2"
+    "vintasend": "^0.5.0",
+    "vintasend-medplum": "^0.5.0",
+    "vintasend-sendgrid": "^0.5.0"
   }
 }
