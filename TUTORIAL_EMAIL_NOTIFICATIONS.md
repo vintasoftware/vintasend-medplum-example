@@ -876,6 +876,8 @@ await vintasend.createNotification({
 
 You can check a full implementation of the task-due-soon notification by looking at the [bot handler](https://github.com/vintasoftware/vintasend-medplum-example/bots/handlers/task-due-soon-notification-bot.ts) and the [scheduleTaskDueSoonEmail](https://github.com/vintasoftware/vintasend-medplum-example/bots/services/schedule-task-due-soon-email.ts).
 
+You can also check how we've set up our Subscription so we run automatically when a task is created or updated:
+
 ### Processing Scheduled Notifications
 
 Scheduled notifications are stored in your database (as FHIR `Communication` resources) and need to be processed by a background job. This job checks for notifications with a `sendAfter` time in the past and sends them.

@@ -12,7 +12,7 @@ export interface BotDescription {
 
 export const BOTS: BotDescription[] = [
   {
-    name: 'send-task-assignment-email',
+    name: 'task-assignment-email-bot',
     needsAdminMembership: true,
     runAsUser: true,
     criteria: 'Task?owner:missing=false',
