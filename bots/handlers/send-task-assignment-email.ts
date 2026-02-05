@@ -2,6 +2,8 @@ import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { sendTaskAssignmentEmail } from '../services/emails/send-task-assignment-email';
 import { buildSendGridConfig } from '../../lib/notification-service';
+import { MedplumSingleton } from '../../lib/medplum-singleton';
+
 
 /**
  * Medplum Bot: Task Assignment Email Notification
@@ -17,6 +19,14 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
   const task = event.input as Task;
   const sendGridVariables = buildSendGridConfig(event);
 
+  // Set Medplum instance in singleton for use in other modules (e.g. context generators)
+  MedplumSingleton.setInstance(medplum);
+
+  if (!task.id) {
+    console.error('[TaskAssignmentBot] Task does not have an id, skipping email notification');
+    return task;
+  }
+
   console.log(`[TaskAssignmentBot] Processing task: ${task.id}`);
   console.log(`[TaskAssignmentBot] Owner: ${task.owner?.reference}`);
 
@@ -27,7 +37,6 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       console.error('[TaskAssignmentBot] PROVIDER_APP_BASE_URL secret is not set');
       throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
     }
-
     try {
       await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
       console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);

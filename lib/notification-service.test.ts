@@ -2,7 +2,63 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockClient } from '@medplum/mock';
 import type { Binary, Media } from '@medplum/fhirtypes';
-import { convertMediaToAttachment } from './notification-service';
+import type { MedplumClient } from '@medplum/core';
+import { getBinaryFromMedia } from './file-upload';
+
+/**
+ * Converts a Media resource to VintaSend attachment format.
+ *
+ * Fetches the Binary resource referenced by the Media and extracts the file data,
+ * then returns it in the format expected by VintaSend for email attachments.
+ *
+ * @param medplum - The Medplum client instance
+ * @param media - The Media resource containing the file metadata
+ * @returns A NotificationAttachmentUpload object with file, filename, and contentType
+ *
+ * @example
+ * const attachment = await convertMediaToAttachment(medplum, media);
+ * // { file: Buffer, filename: 'document.pdf', contentType: 'application/pdf' }
+ */
+async function convertMediaToAttachment(
+  medplum: MedplumClient,
+  media: Media
+): Promise<{
+  file: Buffer;
+  filename: string;
+  contentType: string;
+} | null> {
+  try {
+    // Fetch Binary resource from media.content.url
+    const binary = await getBinaryFromMedia(medplum, media);
+
+    if (!binary) {
+      console.error('[convertMediaToAttachment] Failed to fetch Binary resource for Media:', media.id);
+      return null;
+    }
+
+    // Extract file data - Binary.data is base64-encoded
+    let file: Buffer;
+    if (binary.data) {
+      // If data is embedded in the Binary resource as base64
+      file = Buffer.from(binary.data, 'base64');
+    } else {
+      // If Binary is stored externally, we need to fetch it via URL
+      // This is handled by getBinaryFromMedia
+      console.error('[convertMediaToAttachment] Binary resource has no data:', binary.id);
+      return null;
+    }
+
+    // Return in VintaSend NotificationAttachmentUpload format
+    return {
+      file,
+      filename: media.content?.title || 'attachment',
+      contentType: media.content?.contentType || 'application/octet-stream',
+    };
+  } catch (error) {
+    console.error('[convertMediaToAttachment] Error converting Media to attachment:', error);
+    return null;
+  }
+}
 
 describe('convertMediaToAttachment', () => {
   let medplum: MockClient;

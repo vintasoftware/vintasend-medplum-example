@@ -1,9 +1,6 @@
 import { MedplumClient } from '@medplum/core';
 import type { BotEvent } from '@medplum/core';
-import type { ContextGenerator } from 'vintasend';
 import { VintaSendFactory } from 'vintasend';
-import { MedplumSingleton } from './medplum-singleton';
-import { formatPatientNameWithPreferredName } from './patients';
 import * as compiledTemplates from '../compiled-notification-templates.json';
 import {
   MedplumNotificationBackend,
@@ -12,214 +9,15 @@ import {
   MedplumLogger,
 } from 'vintasend-medplum';
 import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
-import type { Media } from '@medplum/fhirtypes';
-import { getBinaryFromMedia } from './file-upload';
-
-async function getUserById(medplum: MedplumClient, referenceString: string) {
-  if (!referenceString) {
-    // eslint-disable-next-line no-console
-    console.error('[getUserById] referenceString is null/undefined/empty!');
-    throw new Error('The "id" parameter cannot be null, undefined, or an empty string.');
-  }
-
-  const [resourceType, id] = referenceString.split('/');
-
-  if (!id) {
-    // eslint-disable-next-line no-console
-    console.error('[getUserById] ID extracted from referenceString is empty!');
-    throw new Error('The "id" parameter cannot be null, undefined, or an empty string.');
-  }
-
-  return medplum.readResource(resourceType as 'Patient' | 'Practitioner', id);
-}
-
-/**
- * Converts a Media resource to VintaSend attachment format.
- * 
- * Fetches the Binary resource referenced by the Media and extracts the file data,
- * then returns it in the format expected by VintaSend for email attachments.
- * 
- * @param medplum - The Medplum client instance
- * @param media - The Media resource containing the file metadata
- * @returns A NotificationAttachmentUpload object with file, filename, and contentType
- * 
- * @example
- * const attachment = await convertMediaToAttachment(medplum, media);
- * // { file: Buffer, filename: 'document.pdf', contentType: 'application/pdf' }
- */
-export async function convertMediaToAttachment(
-  medplum: MedplumClient,
-  media: Media
-): Promise<{
-  file: Buffer;
-  filename: string;
-  contentType: string;
-} | null> {
-  try {
-    // Fetch Binary resource from media.content.url
-    const binary = await getBinaryFromMedia(medplum, media);
-    
-    if (!binary) {
-      console.error('[convertMediaToAttachment] Failed to fetch Binary resource for Media:', media.id);
-      return null;
-    }
-
-    // Extract file data - Binary.data is base64-encoded
-    let file: Buffer;
-    if (binary.data) {
-      // If data is embedded in the Binary resource as base64
-      file = Buffer.from(binary.data, 'base64');
-    } else {
-      // If Binary is stored externally, we need to fetch it via URL
-      // This is handled by getBinaryFromMedia
-      console.error('[convertMediaToAttachment] Binary resource has no data:', binary.id);
-      return null;
-    }
-
-    // Return in VintaSend NotificationAttachmentUpload format
-    return {
-      file,
-      filename: media.content?.title || 'attachment',
-      contentType: media.content?.contentType || 'application/octet-stream',
-    };
-  } catch (error) {
-    console.error('[convertMediaToAttachment] Error converting Media to attachment:', error);
-    return null;
-  }
-}
-
-class TaskAssignmentContextGenerator implements ContextGenerator {
-  async generate({
-    userId,
-    taskTitle,
-    taskDescription,
-    taskIsUrgent,
-    taskLink,
-    requesterName,
-    attachmentCount,
-  }: {
-    userId: string;
-    taskTitle: string;
-    taskDescription: string;
-    taskIsUrgent: boolean;
-    taskLink: string;
-    requesterName: string;
-    attachmentCount?: number;
-  }): Promise<{
-    firstName: string;
-    taskTitle: string;
-    taskDescription: string;
-    taskIsUrgent: boolean;
-    taskLink: string;
-    requesterName: string;
-    attachmentCount: number;
-  }> {
-    const medplum = MedplumSingleton.getInstance();
-    const user = await getUserById(medplum, userId);
-    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
-
-    return {
-      firstName,
-      taskTitle,
-      taskDescription,
-      taskIsUrgent,
-      taskLink,
-      requesterName,
-      attachmentCount: attachmentCount || 0,
-    };
-  }
-}
-
-class TaskDueSoonContextGenerator implements ContextGenerator {
-  async generate({
-    userId,
-    taskTitle,
-    taskDescription,
-    taskIsUrgent,
-    taskLink,
-    dueDate,
-  }: {
-    userId: string;
-    taskTitle: string;
-    taskDescription: string;
-    taskIsUrgent: boolean;
-    taskLink: string;
-    dueDate: string;
-  }): Promise<{
-    firstName: string;
-    taskTitle: string;
-    taskDescription: string;
-    taskIsUrgent: boolean;
-    taskLink: string;
-    dueDate: string;
-  }> {
-    const medplum = MedplumSingleton.getInstance();
-    const user = await getUserById(medplum, userId);
-    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
-
-    return {
-      firstName,
-      taskTitle,
-      taskDescription,
-      taskIsUrgent,
-      taskLink,
-      dueDate,
-    };
-  }
-}
-
-class InboxMessageContextGenerator implements ContextGenerator {
-  async generate({
-    userId,
-    sender,
-    messageContent,
-    messageTopic,
-  }: {
-    userId: string;
-    sender: string;
-    messageContent: string;
-    messageTopic: string;
-  }): Promise<{
-    firstName: string;
-    senderName: string;
-    senderFirstName: string;
-    messageContent: string;
-    messageTopic: string;
-  }> {
-    const medplum = MedplumSingleton.getInstance();
-    const user = await getUserById(medplum, userId);
-    const firstName = formatPatientNameWithPreferredName(user.name?.[0]) ?? 'Practitioner';
-
-    // Extract sender name from reference
-    let senderName = 'Unknown';
-    let senderFirstName = 'Unknown';
-    try {
-      const [senderResourceType, senderId] = sender.split('/');
-      if (senderId) {
-        const senderResource = await medplum.readResource(senderResourceType as 'Patient' | 'Practitioner', senderId);
-        senderName = formatPatientNameWithPreferredName(senderResource.name?.[0]) ?? 'Unknown';
-        senderFirstName = senderResource.name?.[0]?.given?.[0] || 'Unknown';
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('[InboxMessageContextGenerator] Error fetching sender:', error);
-    }
-
-    return {
-      firstName,
-      senderName,
-      senderFirstName,
-      messageContent,
-      messageTopic,
-    };
-  }
-}
+import {
+  TaskAssignmentContextGenerator,
+  TaskDueSoonContextGenerator,
+} from './notification-context-generators';
 
 // context map for generating the context of each notification
 export const contextGeneratorsMap = {
   taskAssignment: new TaskAssignmentContextGenerator(),
   taskDueSoon: new TaskDueSoonContextGenerator(),
-  inboxMessage: new InboxMessageContextGenerator(),
 } as const;
 
 export type NotificationTypeConfig = {

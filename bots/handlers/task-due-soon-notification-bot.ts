@@ -3,6 +3,7 @@ import { Task } from '@medplum/fhirtypes';
 import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
 import { buildSendGridConfig } from '../../lib/notification-service';
 import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers';
+import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 /**
  * Medplum Bot: Task Due Soon Notification
@@ -20,6 +21,9 @@ import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers'
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   const task = event.input as Task;
   const result = getTaskDueSoonSchedulingReason(task);
+
+  // Set Medplum instance in singleton for use in other modules (e.g. context generators)
+  MedplumSingleton.setInstance(medplum);
 
   switch (result.kind) {
     case 'invalidResource':
