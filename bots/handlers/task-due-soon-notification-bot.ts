@@ -20,6 +20,10 @@ import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<any> {
   const task = event.input as Task;
+
+  // DEBUG: Log every time bot is triggered
+  console.log(`[TaskDueSoonNotificationBot] Bot triggered for task ${task?.id}, due date: ${task.restriction?.period?.end}, version: ${task.meta?.versionId}`);
+
   const result = getTaskDueSoonSchedulingReason(task);
 
   // Set Medplum instance in singleton for use in other modules (e.g. context generators)
@@ -29,33 +33,11 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     case 'invalidResource':
       console.warn('[TaskDueSoonNotificationBot] Invalid task resource received');
       return { message: 'Invalid task resource' };
-    case 'noDueDate':
-      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no due date, skipping`);
-      return { message: 'No due date set', taskId: task?.id };
-    case 'invalidDueDate':
-      console.warn(
-        `[TaskDueSoonNotificationBot] Task ${task?.id} has invalid due date: ${result.dueDate}, skipping`
-      );
-      return { message: 'Invalid due date', taskId: task?.id, dueDate: result.dueDate };
     case 'finalState':
       console.log(
         `[TaskDueSoonNotificationBot] Task ${task?.id} is in final state (${result.status}), skipping`
       );
       return { message: `Task in final state: ${result.status}`, taskId: task?.id };
-    case 'noOwner':
-      console.log(`[TaskDueSoonNotificationBot] Task ${task?.id} has no owner, skipping`);
-      return { message: 'No owner assigned', taskId: task?.id };
-    case 'tooSoon':
-      console.log(
-        `[TaskDueSoonNotificationBot] Task ${task?.id} is due in ${result.hoursUntilDue.toFixed(
-          2
-        )} hours (less than 24), skipping`
-      );
-      return {
-        message: 'Due date is less than 24 hours away',
-        taskId: task?.id,
-        hoursUntilDue: result.hoursUntilDue,
-      };
     case 'ok':
       break;
   }
@@ -70,9 +52,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
 
   try {
     console.log(
-      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id}, due in ${result.hoursUntilDue.toFixed(
-        2
-      )} hours`
+      `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id} hours`
     );
     await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
 
@@ -80,7 +60,6 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       message: 'Notification scheduled successfully',
       taskId: task.id,
       dueDate: task.restriction?.period?.end,
-      hoursUntilDue: result.hoursUntilDue.toFixed(2),
     };
   } catch (error) {
     console.error(`[TaskDueSoonNotificationBot] Error scheduling notification for task ${task.id}:`, error);

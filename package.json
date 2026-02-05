@@ -68,8 +68,8 @@
     "node": "^22.18.0 || >=24.2.0"
   },
   "dependencies": {
-    "vintasend": "^0.5.0",
-    "vintasend-medplum": "^0.5.0",
-    "vintasend-sendgrid": "^0.5.0"
+    "vintasend": "^0.5.1",
+    "vintasend-medplum": "^0.5.1",
+    "vintasend-sendgrid": "^0.5.1"
   }
 }

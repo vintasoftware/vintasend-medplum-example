@@ -3,7 +3,7 @@ import { Task } from '@medplum/fhirtypes';
 export type TaskFinalStatus = 'completed' | 'cancelled' | 'failed' | 'rejected' | 'entered-in-error';
 
 export type TaskDueSoonCheck =
-  | { kind: 'ok'; hoursUntilDue: number }
+  | { kind: 'ok' }
   | { kind: 'invalidResource' }
   | { kind: 'noDueDate' }
   | { kind: 'invalidDueDate'; dueDate: string }
@@ -30,29 +30,11 @@ export function getTaskDueSoonSchedulingReason(task: Task | undefined): TaskDueS
     return { kind: 'invalidResource' };
   }
 
-  const dueDate = task.restriction?.period?.end;
-  if (!dueDate) {
-    return { kind: 'noDueDate' };
-  }
-
   if (task.status && FINAL_STATES.includes(task.status as TaskFinalStatus)) {
     return { kind: 'finalState', status: task.status };
   }
 
-  if (!task.owner) {
-    return { kind: 'noOwner' };
-  }
-
-  const hoursUntilDue = getHoursUntil(dueDate);
-  if (Number.isNaN(hoursUntilDue)) {
-    return { kind: 'invalidDueDate', dueDate };
-  }
-
-  if (hoursUntilDue < 24) {
-    return { kind: 'tooSoon', hoursUntilDue };
-  }
-
-  return { kind: 'ok', hoursUntilDue };
+  return { kind: 'ok' };
 }
 
 export function assertTaskOwnerReference(task: Task): string {

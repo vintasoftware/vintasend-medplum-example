@@ -31,15 +31,11 @@ export const BOTS: BotDescription[] = [
     name: 'task-due-soon-notification-bot',
     needsAdminMembership: true,
     runAsUser: true,
-    criteria: 'Task?owner:missing=false',
+    criteria: 'Task',
     extension: [
       {
-        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-        valueCode: 'create',
-      },
-      {
-        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-        valueCode: 'update',
+        url: 'https://medplum.com/fhir/StructureDefinition/fhir-path-criteria-expression',
+        valueString: '%previous.id.exists().not() or %previous.owner.exists().not() or %previous.restriction.period.exists().not() or %current.owner.exists().not() or %current.restriction.period.exists().not() or (%previous.restriction.period.end != %current.restriction.period.end) or (%previous.owner.reference != %current.owner.reference)',
       },
     ],
   },

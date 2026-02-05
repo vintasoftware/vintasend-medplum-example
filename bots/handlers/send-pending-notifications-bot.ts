@@ -4,13 +4,13 @@ import { buildSendGridConfig, getNotificationService } from '../../lib/notificat
 
 /**
  * Medplum Bot: Send Pending Notifications
- * 
+ *
  * This bot runs periodically (every 5 minutes) to process and send
  * all pending scheduled notifications that are due to be sent.
- * 
+ *
  * It uses VintaSend's notification service to check for notifications
  * where sendAfter <= current time and triggers their delivery.
- * 
+ *
  * Cron: every 5 minutes
  */
 
