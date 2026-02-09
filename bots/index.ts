@@ -16,16 +16,7 @@ export const BOTS: BotDescription[] = [
     needsAdminMembership: true,
     runAsUser: true,
     criteria: 'Task?owner:missing=false',
-    extension: [
-      {
-        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-        valueCode: 'create',
-      },
-      {
-        url: 'https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction',
-        valueCode: 'update',
-      },
-    ],
+    extension: [],
   },
   {
     name: 'task-due-soon-notification-bot',
