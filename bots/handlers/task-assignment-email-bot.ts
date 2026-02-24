@@ -1,7 +1,7 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { sendTaskAssignmentEmail } from '../services/emails/send-task-assignment-email';
-import { buildSendGridConfig } from '../../lib/notification-service';
+import { buildMailgunConfig } from '../../lib/notification-service';
 import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 
@@ -17,7 +17,7 @@ import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
-  const sendGridVariables = buildSendGridConfig(event);
+  const mailgunConfig = buildMailgunConfig(event);
 
   // Set Medplum instance in singleton for use in other modules (e.g. context generators)
   MedplumSingleton.setInstance(medplum);
@@ -38,7 +38,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
     }
     try {
-      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, mailgunConfig);
       console.log(`[TaskAssignmentBot] Email notification sent successfully for task: ${task.id}`);
     } catch (error) {
       console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);

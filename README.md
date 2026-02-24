@@ -16,7 +16,7 @@ This application is based on [Medplum Provider](https://github.com/medplum/medpl
 - **Priority-Based Notifications**: Urgent tasks trigger special "URGENT" email subject lines
 - **Personalized Content**: Emails include practitioner names, task details, and requester information
 - **FHIR-Native Storage**: All notifications stored as FHIR `Communication` resources for full auditability
-- **Flexible Email Providers**: SendGrid integration with easy adapter swapping
+- **Flexible Email Providers**: Mailgun integration with easy adapter swapping
 
 ### 📎 File Attachment Management
 
@@ -54,7 +54,7 @@ The application demonstrates the following core workflows:
 
 - Node.js 18+ and npm installed
 - A [Medplum project](https://www.medplum.com/docs/tutorials/register) to store your data
-- A [SendGrid account](https://sendgrid.com/) with API key for email delivery
+- A [Mailgun account](https://mailgun.com/) with API key for email delivery
 
 #### Installation
 
@@ -76,10 +76,11 @@ MEDPLUM_BASE_URL=https://api.medplum.com
 MEDPLUM_CLIENT_ID=your-client-id-here
 MEDPLUM_CLIENT_SECRET=your-client-secret-here
 
-# SendGrid Configuration
-SENDGRID_API_KEY=your-sendgrid-api-key-here
-SENDGRID_FROM_EMAIL=noreply@yourdomain.com
-SENDGRID_FROM_NAME=Your App Name
+# Mailgun Configuration
+MAILGUN_API_KEY=your-mailgun-api-key-here
+MAILGUN_DOMAIN=yourdomain.com
+MAILGUN_FROM_EMAIL=noreply@yourdomain.com
+MAILGUN_FROM_NAME=BYour App Namea
 
 # Application Configuration
 PROVIDER_APP_BASE_URL=https://your-app-url.com
@@ -144,7 +145,7 @@ src/
 2. **Subscription Triggers**: Medplum subscription evaluates criteria (`Task?owner:exists=true`)
 3. **Bot Executes**: Task assignment bot runs automatically
 4. **Data Enrichment**: Service fetches practitioner details, task attachments, and requester info
-5. **Email Sent**: VintaSend renders Pug templates and sends email via SendGrid
+5. **Email Sent**: VintaSend renders Pug templates and sends email via Mailgun
 6. **Notification Stored**: Email record saved as FHIR `Communication` resource
 
 #### File Attachment Workflow

@@ -1,7 +1,7 @@
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { scheduleTaskDueSoonEmail } from '../services/emails/schedule-task-due-soon-email';
-import { buildSendGridConfig } from '../../lib/notification-service';
+import { buildMailgunConfig } from '../../lib/notification-service';
 import { getTaskDueSoonSchedulingReason } from '../shared/task-due-soon-helpers';
 import { MedplumSingleton } from '../../lib/medplum-singleton';
 
@@ -48,13 +48,13 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
     throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
   }
 
-  const sendgridConfig = buildSendGridConfig(event);
+  const mailgunConfig = buildMailgunConfig(event);
 
   try {
     console.log(
       `[TaskDueSoonNotificationBot] Scheduling notification for task ${task.id} hours`
     );
-    await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, sendgridConfig);
+    await scheduleTaskDueSoonEmail(medplum, task, appBaseUrl, mailgunConfig);
 
     return {
       message: 'Notification scheduled successfully',

@@ -8,7 +8,7 @@ import {
   PugInlineEmailTemplateRendererFactory,
   MedplumLogger,
 } from 'vintasend-medplum';
-import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
+import { MailgunAdapterFactory } from 'vintasend-mailgun';
 import {
   TaskAssignmentContextGenerator,
   TaskDueSoonContextGenerator,
@@ -26,50 +26,60 @@ export type NotificationTypeConfig = {
   UserIdType: string;
 };
 
-export type SendGridConfig = {
-  SENDGRID_API_KEY: string;
-  SENDGRID_FROM_EMAIL: string;
-  SENDGRID_FROM_NAME: string;
+export type MailgunConfig = {
+  MAILGUN_API_KEY: string;
+  MAILGUN_DOMAIN: string;
+  MAILGUN_FROM_EMAIL: string;
+  MAILGUN_FROM_NAME: string;
 };
 
 /**
- * Helper function to build SendGridConfig from bot event secrets
+ * Helper function to build MailgunConfig from bot event secrets
  * Reduces duplication across bot handlers
  * Throws if required secrets (API key or from email) are missing
  */
-export function buildSendGridConfig(event: BotEvent): SendGridConfig {
-  const apiKey = event.secrets.SENDGRID_API_KEY?.valueString;
-  const fromEmail = event.secrets.SENDGRID_FROM_EMAIL?.valueString;
-  const fromName = event.secrets.SENDGRID_FROM_NAME?.valueString || 'Medplum Notifications';
+export function buildMailgunConfig(event: BotEvent): MailgunConfig {
+  const apiKey = event.secrets.MAILGUN_API_KEY?.valueString;
+  const fromEmail = event.secrets.MAILGUN_FROM_EMAIL?.valueString;
+  const fromName = event.secrets.MAILGUN_FROM_NAME?.valueString || 'Medplum Notifications';
+  const domain = event.secrets.MAILGUN_DOMAIN?.valueString;
 
   if (!apiKey) {
     // eslint-disable-next-line no-console
-    console.error('[buildSendGridConfig] SENDGRID_API_KEY secret is missing or empty');
-    throw new Error('SENDGRID_API_KEY must be configured in bot secrets');
+    console.error('[buildMailgunConfig] MAILGUN_API_KEY secret is missing or empty');
+    throw new Error('MAILGUN_API_KEY must be configured in bot secrets');
+  }
+
+  if (!domain) {
+    // eslint-disable-next-line no-console
+    console.error('[buildMailgunConfig] MAILGUN_DOMAIN secret is missing or empty');
+    throw new Error('MAILGUN_DOMAIN must be configured in bot secrets');
   }
 
   if (!fromEmail) {
     // eslint-disable-next-line no-console
-    console.error('[buildSendGridConfig] SENDGRID_FROM_EMAIL secret is missing or empty');
-    throw new Error('SENDGRID_FROM_EMAIL must be configured in bot secrets');
+    console.error('[buildMailgunConfig] MAILGUN_FROM_EMAIL secret is missing or empty');
+    throw new Error('MAILGUN_FROM_EMAIL must be configured in bot secrets');
   }
 
   return {
-    SENDGRID_API_KEY: apiKey,
-    SENDGRID_FROM_EMAIL: fromEmail,
-    SENDGRID_FROM_NAME: fromName,
+    MAILGUN_API_KEY: apiKey,
+    MAILGUN_FROM_EMAIL: fromEmail,
+    MAILGUN_FROM_NAME: fromName,
+    MAILGUN_DOMAIN: domain,
   };
 }
 
-export function getNotificationService(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
+export function getNotificationService(medplum: MedplumClient, mailgunConfig: MailgunConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
     compiledTemplates
   );
-  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
-    apiKey: sendgridConfig.SENDGRID_API_KEY || '',
-    fromEmail: sendgridConfig.SENDGRID_FROM_EMAIL || '',
-    fromName: sendgridConfig.SENDGRID_FROM_NAME,
+  const adapter = new MailgunAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
+    apiKey: mailgunConfig.MAILGUN_API_KEY || '',
+    domain: mailgunConfig.MAILGUN_DOMAIN || '',
+    fromEmail: mailgunConfig.MAILGUN_FROM_EMAIL || '',
+    fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],

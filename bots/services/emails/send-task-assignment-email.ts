@@ -1,13 +1,13 @@
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
-import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+import { getNotificationService, MailgunConfig } from '../../../lib/notification-service';
 import { getTaskAttachments } from '../../../lib/file-upload';
 
 export async function sendTaskAssignmentEmail(
   medplum: MedplumClient,
   task: Task,
   taskLinkBaseUrl: string,
-  sendgridConfig: SendGridConfig
+  mailgunConfig: MailgunConfig
 ) {
   /* sends a task assignment email to a practitioner */
 
@@ -34,7 +34,7 @@ export async function sendTaskAssignmentEmail(
     return;
   }
 
-  const vintasend = getNotificationService(medplum, sendgridConfig);
+  const vintasend = getNotificationService(medplum, mailgunConfig);
 
   try {
     if (!task.id) {

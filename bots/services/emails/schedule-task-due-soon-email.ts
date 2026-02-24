@@ -1,6 +1,6 @@
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
-import { getNotificationService, SendGridConfig, type NotificationTypeConfig } from '../../../lib/notification-service';
+import { getNotificationService, MailgunConfig, type NotificationTypeConfig } from '../../../lib/notification-service';
 import { computeReminderTime } from '../../shared/task-due-soon-helpers';
 import type { DatabaseNotification } from 'vintasend/dist/types/notification';
 
@@ -9,7 +9,7 @@ const NOTIFICATION_EXTENSION_URL = 'http://vintasend-medplum-example.com/fhir/St
 async function cancelExistingNotificationIfAny(
   medplum: MedplumClient,
   task: Task,
-  sendgridConfig: SendGridConfig
+  mailgunConfig: MailgunConfig
 ): Promise<void> {
   const notificationIdExtension = task.extension?.find(
     (ext) => ext.url === NOTIFICATION_EXTENSION_URL
@@ -38,7 +38,7 @@ async function cancelExistingNotificationIfAny(
     return;
   }
 
-  const vintasend = getNotificationService(medplum, sendgridConfig);
+  const vintasend = getNotificationService(medplum, mailgunConfig);
   try {
     const existingNotification = await vintasend.getNotification(existingNotificationId, false);
     if (existingNotification && existingNotification.status === 'PENDING_SEND') {
@@ -72,7 +72,7 @@ export async function scheduleTaskDueSoonEmail(
   medplum: MedplumClient,
   task: Task,
   taskLinkBaseUrl: string,
-  sendgridConfig: SendGridConfig
+  mailgunConfig: MailgunConfig
 ) {
   /* sends a task due soon reminder email to a practitioner 24 hours before the task is due */
 
@@ -91,7 +91,7 @@ export async function scheduleTaskDueSoonEmail(
     // eslint-disable-next-line no-console
     console.error('[scheduleTaskDueSoonEmail] Task has no valid due date');
     // Cancel existing notification if due date is removed
-    await cancelExistingNotificationIfAny(medplum, task, sendgridConfig);
+    await cancelExistingNotificationIfAny(medplum, task, mailgunConfig);
     return;
   }
 
@@ -106,7 +106,7 @@ export async function scheduleTaskDueSoonEmail(
       )} hours), skipping scheduling`
     );
     // Cancel existing notification if due date is too soon
-    await cancelExistingNotificationIfAny(medplum, task, sendgridConfig);
+    await cancelExistingNotificationIfAny(medplum, task, mailgunConfig);
     return;
   }
 
@@ -115,7 +115,7 @@ export async function scheduleTaskDueSoonEmail(
     // eslint-disable-next-line no-console
     console.error('[scheduleTaskDueSoonEmail] Task has no owner. Canceling any existing notification if any.');
     // Cancel existing notification if owner is removed
-    await cancelExistingNotificationIfAny(medplum, task, sendgridConfig);
+    await cancelExistingNotificationIfAny(medplum, task, mailgunConfig);
     return;
   }
 
@@ -124,7 +124,7 @@ export async function scheduleTaskDueSoonEmail(
     return;
   }
 
-  const vintasend = getNotificationService(medplum, sendgridConfig);
+  const vintasend = getNotificationService(medplum, mailgunConfig);
 
   try {
     // Check if task has an existing notification ID stored as an extension

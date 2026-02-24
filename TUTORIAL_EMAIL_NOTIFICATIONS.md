@@ -56,9 +56,9 @@ VintaSend-Medplum brings VintaSend's notification capabilities to Medplum health
 - Works with Medplum's existing security and access controls
 
 **📧 Flexible Email Providers**
-- Use any email provider through VintaSend adapters (SendGrid, AWS SES, Medplum, etc.)
+- Use any email provider through VintaSend adapters (Mailgun, AWS SES, SendGrid, etc.)
 - Swap providers without changing your application code
-- This tutorial uses SendGrid for reliable email delivery
+- This tutorial uses Mailgun for reliable email delivery
 
 **🎨 Pre-compiled Templates**
 - Pug templates compiled to JSON at build time
@@ -92,7 +92,7 @@ By the end of this tutorial, you'll have:
 First, add the VintaSend packages to your project:
 
 ```bash
-npm install vintasend vintasend-medplum vintasend-sendgrid
+npm install vintasend vintasend-medplum vintasend-mailgun
 ```
 
 Update your package.json:
@@ -102,7 +102,7 @@ Update your package.json:
   "dependencies": {
     "vintasend": "^0.5.0",
     "vintasend-medplum": "^0.5.0",
-    "vintasend-sendgrid": "^0.5.0"
+    "vintasend-mailgun": "^0.5.0"
   }
 }
 ```
@@ -110,7 +110,7 @@ Update your package.json:
 We're using:
 - `vintasend`: The core notification framework
 - `vintasend-medplum`: Medplum-specific adapters for FHIR storage
-- `vintasend-sendgrid`: SendGrid adapter for email delivery
+- `vintasend-mailgun`: Mailgun adapter for email delivery
 
 ## Step 2: Create Email Templates with Pug
 
@@ -290,7 +290,7 @@ import {
   PugInlineEmailTemplateRendererFactory,
   MedplumLogger
 } from 'vintasend-medplum';
-import { SendgridNotificationAdapterFactory } from 'vintasend-sendgrid';
+import { MailgunAdapterFactory } from 'vintasend-mailgun';
 import { TaskAssignmentContextGenerator } from './notification-context-generators/task-assignment';
 
 // context map for generating the context of each notification
@@ -304,47 +304,57 @@ export type NotificationTypeConfig = {
   UserIdType: string;
 };
 
-export type SendGridConfig = {
-  SENDGRID_API_KEY: string;
-  SENDGRID_FROM_EMAIL: string;
-  SENDGRID_FROM_NAME: string;
+export type MailgunConfig = {
+  MAILGUN_API_KEY: string;
+  MAILGUN_DOMAIN: string;
+  MAILGUN_FROM_EMAIL: string;
+  MAILGUN_FROM_NAME: string;
 };
 
-export function buildSendGridConfig(event: BotEvent): SendGridConfig {
-  const apiKey = event.secrets.SENDGRID_API_KEY?.valueString;
-  const fromEmail = event.secrets.SENDGRID_FROM_EMAIL?.valueString;
-  const fromName = event.secrets.SENDGRID_FROM_NAME?.valueString || 'Medplum Notifications';
+export function buildMailgunConfig(event: BotEvent): MailgunConfig {
+  const apiKey = event.secrets.MAILGUN_API_KEY?.valueString;
+  const fromEmail = event.secrets.MAILGUN_FROM_EMAIL?.valueString;
+  const fromName = event.secrets.MAILGUN_FROM_NAME?.valueString || 'Medplum Notifications';
+  const domain = event.secrets.MAILGUN_DOMAIN?.valueString;
 
   if (!apiKey) {
-    throw new Error('SENDGRID_API_KEY must be configured in bot secrets');
+    throw new Error('MAILGUN_API_KEY must be configured in bot secrets');
+  }
+
+  if (!domain) {
+    throw new Error('MAILGUN_DOMAIN must be configured in bot secrets');
   }
 
   if (!fromEmail) {
-    throw new Error('SENDGRID_FROM_EMAIL must be configured in bot secrets');
+    throw new Error('MAILGUN_FROM_EMAIL must be configured in bot secrets');
   }
 
   return {
-    SENDGRID_API_KEY: apiKey,
-    SENDGRID_FROM_EMAIL: fromEmail,
-    SENDGRID_FROM_NAME: fromName,
+    MAILGUN_API_KEY: apiKey,
+    MAILGUN_DOMAIN: domain,
+    MAILGUN_FROM_EMAIL: fromEmail,
+    MAILGUN_FROM_NAME: fromName,
   };
 }
 
-export function getNotificationService(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
+export function getNotificationService(medplum: MedplumClient, mailgunConfig: MailgunConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
     compiledTemplates
   );
-  const adapter = new SendgridNotificationAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
-    apiKey: sendgridConfig.SENDGRID_API_KEY || '',
-    fromEmail: sendgridConfig.SENDGRID_FROM_EMAIL || '',
-    fromName: sendgridConfig.SENDGRID_FROM_NAME,
+  const adapter = new MailgunAdapterFactory<NotificationTypeConfig>().create(templateRenderer, false, {
+    apiKey: mailgunConfig.MAILGUN_API_KEY || '',
+    domain: mailgunConfig.MAILGUN_DOMAIN || '',
+    fromEmail: mailgunConfig.MAILGUN_FROM_EMAIL || '',
+    fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
   return new VintaSendFactory<NotificationTypeConfig>().create(
     [adapter],
     backend,
     new MedplumLogger(),
-    contextGeneratorsMap
+    contextGeneratorsMap,
+    undefined,
+    new MedplumAttachmentManager(medplum)
   );
 }
 ```
@@ -360,13 +370,14 @@ This file is the core of VintaSend integration:
 3. **VintaSend Components**:
    - **Backend**: Stores notification data in Medplum as FHIR `Communication` resources
    - **Template Renderer**: Renders Pug templates from the compiled JSON
-   - **Adapter**: Handles email sending through SendGrid
+   - **Adapter**: Handles email sending through Mailgun
    - **Logger**: Logs notification events for debugging
 
-4. **SendGrid Configuration**: The adapter is configured with SendGrid credentials passed via the `SendGridConfig` object, which is built from Medplum bot secrets using the `buildSendGridConfig()` helper:
-   - `SENDGRID_API_KEY`: Your SendGrid API key
-   - `SENDGRID_FROM_EMAIL`: The verified sender email address
-   - `SENDGRID_FROM_NAME`: Optional display name for the sender
+4. **Mailgun Configuration**: The adapter is configured with Mailgun credentials passed via the `MailgunConfig` object, which is built from Medplum bot secrets using the `buildMailgunConfig()` helper:
+   - `MAILGUN_API_KEY`: Your Mailgun API key
+   - `MAILGUN_DOMAIN`: Your Mailgun sending domain
+   - `MAILGUN_FROM_EMAIL`: The verified sender email address
+   - `MAILGUN_FROM_NAME`: Optional display name for the sender
 
 ## Step 5: Create the Task Assignment Email Service
 
@@ -377,14 +388,14 @@ Create `services/emails/send-task-assignment-email.ts`:
 ```typescript
 import { MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
-import { getNotificationService, SendGridConfig } from '../../../lib/notification-service';
+import { getNotificationService, MailgunConfig } from '../../../lib/notification-service';
 import { getTaskAttachments } from '../../../lib/file-upload';
 
 export async function sendTaskAssignmentEmail(
   medplum: MedplumClient,
   task: Task,
   taskLinkBaseUrl: string,
-  sendgridConfig: SendGridConfig
+  mailgunConfig: MailgunConfig
 ) {
   /* sends a task assignment email to a practitioner */
 
@@ -398,7 +409,7 @@ export async function sendTaskAssignmentEmail(
     return;
   }
 
-  const vintasend = getNotificationService(medplum, sendgridConfig);
+  const vintasend = getNotificationService(medplum, mailgunConfig);
 
   if (!task.id) {
     throw new Error('Task must have an id to send task assignment email');
@@ -437,7 +448,7 @@ You can now use the service in your Medplum bots or application code:
 import { BotEvent, MedplumClient } from '@medplum/core';
 import { Task } from '@medplum/fhirtypes';
 import { sendTaskAssignmentEmail } from '../services/emails/send-task-assignment-email';
-import { buildSendGridConfig } from '../../lib/notification-service';
+import { buildMailgunConfig } from '../../lib/notification-service';
 import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 
@@ -453,7 +464,7 @@ import { MedplumSingleton } from '../../lib/medplum-singleton';
 
 export async function handler(medplum: MedplumClient, event: BotEvent): Promise<Task> {
   const task = event.input as Task;
-  const sendGridVariables = buildSendGridConfig(event);
+  const mailgunConfig = buildMailgunConfig(event);
 
   // We need to use a singleton here, so the context generators
   // have access to the medplum client
@@ -471,7 +482,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
       throw new Error('PROVIDER_APP_BASE_URL must be configured in bot secrets');
     }
     try {
-      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, sendGridVariables);
+      await sendTaskAssignmentEmail(medplum, task, appBaseUrl, mailgunConfig);
     } catch (error) {
       console.error(`[TaskAssignmentBot] Failed to send email for task: ${task.id}`, error);
       // Don't throw - we don't want the subscription to fail
@@ -509,8 +520,8 @@ const task = await medplum.createResource({
 
 // Send the email (from a bot handler)
 // In your bot, you would get these from event.secrets
-const sendgridConfig = buildSendGridConfig(event);
-await sendTaskAssignmentEmail(medplum, task, 'https://your-app-url.com', sendgridConfig);
+const mailgunConfig = buildMailgunConfig(event);
+await sendTaskAssignmentEmail(medplum, task, 'https://your-app-url.com', mailgunConfig);
 ```
 
 If want to automate this, you can create a subscription pointing to your bot with `Task?owner:exists=true` as criteria:
@@ -572,7 +583,7 @@ Let's trace through what happens when you call `sendTaskAssignmentEmail()`:
    - Extracts their first name (respecting preferred names)
    - Merges with the provided parameters
 5. **Template Rendering**: Pug templates are rendered with the enriched context
-6. **Email Sent**: The email is sent via SendGrid's API
+6. **Email Sent**: The email is sent via Mailgun's API
 7. **Notification Stored**: VintaSend stores the notification record in Medplum as a FHIR `Communication` resource for auditing
 
 ## Deployment & Infrastructure
@@ -583,9 +594,10 @@ To deploy this in a production Medplum environment, you'll need:
 2. **FHIR Subscription**: A subscription that triggers the bot when `Task?owner:exists=true`
 3. **Build Configuration**: esbuild or similar bundler to compile the bot code
 4. **Bot Secrets**: Configure these secrets in your Medplum bot:
-   - `SENDGRID_API_KEY`: Your SendGrid API key
-   - `SENDGRID_FROM_EMAIL`: The verified sender email address
-   - `SENDGRID_FROM_NAME`: Optional display name for the sender
+   - `MAILGUN_API_KEY`: Your Mailgun API key
+   - `MAILGUN_DOMAIN`: Your Mailgun sending domain
+   - `MAILGUN_FROM_EMAIL`: The verified sender email address
+   - `MAILGUN_FROM_NAME`: Optional display name for the sender
    - `PROVIDER_APP_BASE_URL`: The base URL of your application
 
 **Complete implementation details** (including bot handlers, subscriptions, deployment scripts, and esbuild configuration) are available in our [GitHub repository](https://github.com/vintasoftware/vintasend-medplum-example).
@@ -616,7 +628,7 @@ One of VintaSend's powerful features is built-in attachment management. Files ar
 - Full FHIR compliance and access control
 
 **📧 Email Provider Agnostic**
-- Works with SendGrid, AWS SES, or any adapter
+- Works with Mailgun, AWS SES, or any adapter
 - Attachment handling abstracted from email provider
 - Easy to switch providers without code changes
 
@@ -764,7 +776,7 @@ await vintasend.createNotification({
 3. **Task Association**: Media references are added to the Task's `input` array
 4. **Notification Creation**: When creating a notification, pass `attachmentIds` (Binary IDs)
 5. **VintaSend Processing**: VintaSend's `MedplumAttachmentManager` fetches the files
-6. **Email Sending**: Files are attached to the email via the SendGrid adapter
+6. **Email Sending**: Files are attached to the email via the Mailgun adapter
 7. **Deduplication**: VintaSend checks checksums to avoid storing duplicate files
 
 **Complete file upload UI examples** (React components for file selection, validation, and preview) are available in our [GitHub repository](https://github.com/vintasoftware/vintasend-medplum-example).
@@ -893,7 +905,7 @@ import { MedplumClient } from '@medplum/core';
 import { Communication } from '@medplum/fhirtypes';
 import { getNotificationService } from '../lib/notification-service';
 
-export async function processPendingNotifications(medplum: MedplumClient, sendgridConfig: SendGridConfig) {
+export async function processPendingNotifications(medplum: MedplumClient, mailgunConfig: MailgunConfig) {
   // Query for all pending notifications where sendAfter is in the past
   const pendingNotifications = await medplum.searchResources('Communication', {
     status: 'preparation', // Pending status
@@ -902,7 +914,7 @@ export async function processPendingNotifications(medplum: MedplumClient, sendgr
 
   console.log(`[PendingNotificationsWorker] Found ${pendingNotifications.length} pending notifications`);
 
-  const vintasend = getNotificationService(medplum, sendgridConfig);
+  const vintasend = getNotificationService(medplum, mailgunConfig);
 
   for (const notification of pendingNotifications) {
     try {
@@ -925,7 +937,7 @@ export async function processPendingNotifications(medplum: MedplumClient, sendgr
    - Retrieves the stored context parameters
    - Calls the appropriate context generator to fetch fresh data
    - Ensures the email has the most current information
-4. **Send Email**: Renders templates with fresh context and sends via SendGrid
+4. **Send Email**: Renders templates with fresh context and sends via Mailgun
 5. **Update Status**: Changes status to `sent` (or `failed` on error)
 
 #### Why the Worker is Necessary
@@ -997,7 +1009,7 @@ The complete implementation details (including cron configuration, worker deploy
                      │
                      ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 7. Email sent via SendGrid                                   │
+│ 7. Email sent via Mailgun                                    │
 │    - Email delivered to practitioner                         │
 │    - Communication resource status: sent                     │
 └──────────────────────────────────────────────────────────────┘

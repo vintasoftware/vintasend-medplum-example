@@ -13,7 +13,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
   },
-  "exclude": ["dist"]
+  "exclude": ["dist", "**/__tests__/*", "node_modules", "src/**/*.test.ts", "src/**/*.test.tsx"],
 }
