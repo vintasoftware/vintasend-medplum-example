@@ -1,6 +1,6 @@
 import { MedplumClient } from '@medplum/core';
 import type { BotEvent } from '@medplum/core';
-import { VintaSendFactory } from 'vintasend';
+import { type BaseGitCommitShaProvider, VintaSendFactory } from 'vintasend';
 import * as compiledTemplates from '../compiled-notification-templates.json';
 import {
   MedplumNotificationBackend,
@@ -32,6 +32,10 @@ export type MailgunConfig = {
   MAILGUN_DOMAIN: string;
   MAILGUN_FROM_EMAIL: string;
   MAILGUN_FROM_NAME: string;
+};
+
+export type GitCommitShaConfig = {
+  GIT_CURRENT_COMMIT_SHA?: string;
 };
 
 /**
@@ -71,7 +75,18 @@ export function buildMailgunConfig(event: BotEvent): MailgunConfig {
   };
 }
 
-export function getNotificationService(medplum: MedplumClient, mailgunConfig: MailgunConfig) {
+export function buildGitCommitShaConfig(event: BotEvent): GitCommitShaConfig {
+  const gitCurrentCommitSha = event.secrets.GIT_CURRENT_COMMIT_SHA?.valueString?.trim();
+  return {
+    GIT_CURRENT_COMMIT_SHA: gitCurrentCommitSha || undefined,
+  };
+}
+
+export function getNotificationService(
+  medplum: MedplumClient,
+  mailgunConfig: MailgunConfig,
+  gitCommitShaConfig?: GitCommitShaConfig,
+) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
   const logger = new MedplumLogger();
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
@@ -83,12 +98,19 @@ export function getNotificationService(medplum: MedplumClient, mailgunConfig: Ma
     fromEmail: mailgunConfig.MAILGUN_FROM_EMAIL || '',
     fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
+  const gitCommitShaProvider: BaseGitCommitShaProvider =
+    gitCommitShaConfig?.GIT_CURRENT_COMMIT_SHA
+      ? {
+          getCurrentGitCommitSha: () => gitCommitShaConfig.GIT_CURRENT_COMMIT_SHA as string,
+        }
+      : new MedplumSecretGitCommitShaProvider(medplum);
+
   return new VintaSendFactory<NotificationTypeConfig>().create({
     adapters: [adapter],
     backend,
     logger,
     contextGeneratorsMap,
     attachmentManager: new MedplumAttachmentManager(medplum),
-    gitCommitShaProvider: new MedplumSecretGitCommitShaProvider(),
+    gitCommitShaProvider,
   });
 }
