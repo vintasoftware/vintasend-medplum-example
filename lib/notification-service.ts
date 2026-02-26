@@ -13,6 +13,7 @@ import {
   TaskAssignmentContextGenerator,
   TaskDueSoonContextGenerator,
 } from './notification-context-generators';
+import { MedplumSecretGitCommitShaProvider } from './medplum-secret-git-commit-sha-provider';
 
 // context map for generating the context of each notification
 export const contextGeneratorsMap = {
@@ -72,6 +73,7 @@ export function buildMailgunConfig(event: BotEvent): MailgunConfig {
 
 export function getNotificationService(medplum: MedplumClient, mailgunConfig: MailgunConfig) {
   const backend = new MedplumNotificationBackend<NotificationTypeConfig>(medplum);
+  const logger = new MedplumLogger();
   const templateRenderer = new PugInlineEmailTemplateRendererFactory<NotificationTypeConfig>().create(
     compiledTemplates
   );
@@ -81,12 +83,12 @@ export function getNotificationService(medplum: MedplumClient, mailgunConfig: Ma
     fromEmail: mailgunConfig.MAILGUN_FROM_EMAIL || '',
     fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
-  return new VintaSendFactory<NotificationTypeConfig>().create(
-    [adapter],
+  return new VintaSendFactory<NotificationTypeConfig>().create({
+    adapters: [adapter],
     backend,
-    new MedplumLogger(),
+    logger,
     contextGeneratorsMap,
-    undefined,
-    new MedplumAttachmentManager(medplum)
-  );
+    attachmentManager: new MedplumAttachmentManager(medplum),
+    gitCommitShaProvider: new MedplumSecretGitCommitShaProvider(),
+  });
 }

@@ -1,9 +1,12 @@
 import { ContentType, getReferenceString, MedplumClient, WithId } from '@medplum/core';
-import { Bot, Bundle, BundleEntry, Questionnaire } from '@medplum/fhirtypes';
+import { Bot, Bundle, BundleEntry, ProjectSetting, Questionnaire } from '@medplum/fhirtypes';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import { BotDescription, BOTS } from '../bots/index.js';
 import { BOTS_SYSTEM } from '../lib/constants.js';
 import { getMedplumClient } from './client.js';
+
+const GIT_CURRENT_COMMIT_SHA_SECRET_NAME = 'GIT_CURRENT_COMMIT_SHA';
 
 async function readBotFiles(description: BotDescription, medplum: MedplumClient) {
   const distFile = fs.readFileSync(`dist/bots/handlers/${description.name}.js`, 'utf-8');
@@ -83,6 +86,30 @@ async function generateBundle(medplum: MedplumClient): Promise<Bundle> {
   return bundle;
 }
 
+function getCurrentGitCommitSha(): string {
+  const sha = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+
+  if (!/^[0-9a-fA-F]{40}$/.test(sha)) {
+    throw new Error(`Invalid git commit sha resolved from repository: "${sha}"`);
+  }
+
+  return sha.toLowerCase();
+}
+
+async function upsertCurrentGitCommitShaSecret(medplum: MedplumClient, projectId: string): Promise<void> {
+  const projectResult = await medplum.get(`admin/projects/${projectId}`);
+  const existingSecrets: ProjectSetting[] = projectResult.project?.secret ?? [];
+  const currentGitCommitSha = getCurrentGitCommitSha();
+
+  const updatedSecrets = existingSecrets.filter((secret) => secret.name !== GIT_CURRENT_COMMIT_SHA_SECRET_NAME);
+  updatedSecrets.push({
+    name: GIT_CURRENT_COMMIT_SHA_SECRET_NAME,
+    valueString: currentGitCommitSha,
+  });
+
+  await medplum.post(`admin/projects/${projectId}/secrets`, updatedSecrets);
+}
+
 async function deployBots(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log('\nUploading bots...\n');
@@ -91,6 +118,12 @@ async function deployBots(): Promise<void> {
 
   const profile = await medplum.getProfile();
   const projectId = profile?.meta?.project;
+
+  if (!projectId) {
+    throw new Error('Could not resolve Medplum project id from current profile');
+  }
+
+  await upsertCurrentGitCommitShaSecret(medplum, projectId);
 
   const questionnaires: Questionnaire[] = [];
 
