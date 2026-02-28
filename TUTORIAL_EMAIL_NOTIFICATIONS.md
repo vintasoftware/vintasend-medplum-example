@@ -349,12 +349,11 @@ export function getNotificationService(medplum: MedplumClient, mailgunConfig: Ma
     fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
   return new VintaSendFactory<NotificationTypeConfig>().create(
-    [adapter],
+    adapters: [adapter],
     backend,
-    new MedplumLogger(),
+    logger: new MedplumLogger(),
     contextGeneratorsMap,
-    undefined,
-    new MedplumAttachmentManager(medplum)
+    attachmentManager: new MedplumAttachmentManager(medplum)
   );
 }
 ```
@@ -532,16 +531,7 @@ If want to automate this, you can create a subscription pointing to your bot wit
   "status": "active",
   "reason": "send-task-assignment-email-subscription",
   "criteria": "Task?owner:missing=false",
-  "extension": [
-    {
-      "url": "https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction",
-      "valueCode": "create"
-    },
-    {
-      "url": "https://medplum.com/fhir/StructureDefinition/subscription-supported-interaction",
-      "valueCode": "update"
-    }
-  ],
+  "extension": [],
   "channel": {
     "endpoint": "Bot/3da5e4db-779a-4181-ae9c-c216acb61d07",
     "type": "rest-hook",
