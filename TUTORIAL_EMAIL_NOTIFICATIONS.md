@@ -789,7 +789,7 @@ One of VintaSend's most powerful features is the ability to schedule notificatio
 
 **📋 Audit Trail**
 - All notifications stored as FHIR `Communication` resources
-- Track status changes (pending → sent/failed)
+- Track status changes (pending → sent/failed). In FHIR Communications, the status would be “preparation” for pending, “completed” for sent, and “entered-in-error” for failed.
 - Full history of scheduled and sent notifications
 
 ### Creating Task Reminder Templates
