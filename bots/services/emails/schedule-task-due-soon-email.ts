@@ -7,7 +7,7 @@ import {
   type NotificationTypeConfig,
 } from '../../../lib/notification-service';
 import { computeReminderTime } from '../../shared/task-due-soon-helpers';
-import type { DatabaseNotification } from 'vintasend/dist/types/notification';
+import type { DatabaseNotification } from 'vintasend';
 
 const NOTIFICATION_EXTENSION_URL = 'http://vintasend-medplum-example.com/fhir/StructureDefinition/task-due-soon-notification-id';
 

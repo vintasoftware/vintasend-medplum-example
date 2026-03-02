@@ -100,9 +100,9 @@ Update your package.json:
 ```json
 {
   "dependencies": {
-    "vintasend": "^0.5.0",
-    "vintasend-medplum": "^0.5.0",
-    "vintasend-mailgun": "^0.5.0"
+    "vintasend": "^0.11.0",
+    "vintasend-medplum": "^0.11.0",
+    "vintasend-mailgun": "^0.11.0"
   }
 }
 ```
