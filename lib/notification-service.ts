@@ -5,9 +5,10 @@ import * as compiledTemplates from '../compiled-notification-templates.json';
 import {
   MedplumNotificationBackend,
   MedplumAttachmentManager,
-  PugInlineEmailTemplateRendererFactory,
   MedplumLogger,
 } from 'vintasend-medplum';
+import { PugInlineEmailTemplateRendererFactory } from 'vintasend-pug';
+
 import { MailgunAdapterFactory } from 'vintasend-mailgun';
 import {
   TaskAssignmentContextGenerator,
