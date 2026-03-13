@@ -92,7 +92,7 @@ By the end of this tutorial, you'll have:
 First, add the VintaSend packages to your project:
 
 ```bash
-npm install vintasend vintasend-medplum vintasend-mailgun
+npm install vintasend vintasend-medplum vintasend-mailgun vintasend-pug
 ```
 
 Update your package.json:
@@ -100,9 +100,12 @@ Update your package.json:
 ```json
 {
   "dependencies": {
-    "vintasend": "^0.11.0",
-    "vintasend-medplum": "^0.11.0",
-    "vintasend-mailgun": "^0.11.0"
+    // prefer using the lastest versions, all officially supported packages
+    // should be used on the same version
+    "vintasend": "^0.13.3",
+    "vintasend-medplum": "^0.13.3",
+    "vintasend-mailgun": "^0.13.3",
+    "vintasend-pug": "^0.13.3"
   }
 }
 ```
@@ -287,10 +290,10 @@ import * as compiledTemplates from '../compiled-notification-templates.json';
 import {
   MedplumNotificationBackend,
   MedplumAttachmentManager,
-  PugInlineEmailTemplateRendererFactory,
-  MedplumLogger
+  MedplumLogger,
 } from 'vintasend-medplum';
 import { MailgunAdapterFactory } from 'vintasend-mailgun';
+import { PugInlineEmailTemplateRendererFactory } from 'vintasend-pug';
 import { TaskAssignmentContextGenerator } from './notification-context-generators/task-assignment';
 
 // context map for generating the context of each notification
@@ -348,13 +351,13 @@ export function getNotificationService(medplum: MedplumClient, mailgunConfig: Ma
     fromEmail: mailgunConfig.MAILGUN_FROM_EMAIL || '',
     fromName: mailgunConfig.MAILGUN_FROM_NAME,
   });
-  return new VintaSendFactory<NotificationTypeConfig>().create(
+  return new VintaSendFactory<NotificationTypeConfig>().create({
     adapters: [adapter],
     backend,
     logger: new MedplumLogger(),
     contextGeneratorsMap,
     attachmentManager: new MedplumAttachmentManager(medplum)
-  );
+  });
 }
 ```
 
