@@ -1,6 +1,10 @@
 {
   "name": "vintasend-medplum-example",
   "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vintasoftware/vintasend-medplum-example.git"
+  },
   "private": true,
   "type": "module",
   "scripts": {
